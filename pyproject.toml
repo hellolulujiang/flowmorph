@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowmorph"
+version = "1.0.0"
+description = "The shape and terrain of every pixel's upstream catchment on a D8 flow-direction grid"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Lulu Jiang", email = "lulu_jiang@pku.edu.cn" }]
+keywords = ["hydrology", "D8", "catchment", "basin shape", "geomorphometry", "MERIT Hydro"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Hydrology",
+]
+dependencies = ["numpy>=1.21", "numba>=0.56", "scipy>=1.7", "rasterio>=1.2"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://fullhydro.org/tools/"
+
+[tool.setuptools.packages.find]
+include = ["flowmorph*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
