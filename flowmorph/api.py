@@ -7,8 +7,8 @@ import numpy as np
 
 from . import raster
 from .boundary import BOUNDARY_NAMES, boundary_walk
-from .earth import model_code
-from .grid import pixel_edges_deg, snap_transform
+from .earth import model_code, pixel_area_m2
+from .grid import exact_transform, pixel_edges_deg, snap_transform
 from .network import check_index, dfs_sequence, downstream_index
 from .shape import SHAPE_NAMES, shape_arithmetic
 from .slope import local_slope
@@ -28,6 +28,12 @@ ATTRIBUTE_NAMES = (
 def _frozen(array):
     """A cached or kept array made read-only: it is handed out on every call, and a caller who wrote to it would
     change every later result with no sign.  Take a ``.copy()`` to modify one."""
+    # the array that owns the memory first: a reshaped view is frozen on its own, and a caller could still write
+    # through its base, which the next call would hand out changed
+    owner = array
+    while isinstance(owner.base, np.ndarray):
+        owner = owner.base
+    owner.flags.writeable = False
     array.flags.writeable = False
     return array
 
@@ -38,12 +44,10 @@ def _kept(values, dtype):
 
 
 def _check_longitude_latitude(transform, shape, crs):
-    """The grid must lie in longitude and latitude: its CRS geographic when one is given, and its extent inside
+    """The grid must lie in longitude and latitude: its CRS geographic in degrees when given, and its extent inside
     [-540, 540] degrees of longitude and [-90, 90] of latitude (a projected grid in metres is far outside)."""
     if crs is not None:
-        from rasterio.crs import CRS
-        if not CRS.from_user_input(crs).is_geographic:
-            raise ValueError(f"FlowMorph reads longitude-latitude grids in degrees; the CRS given is {crs}")
+        raster._check_crs(crs, "FlowMorph")
     nrow, ncol = shape
     west, north = transform[0], transform[3]
     east = west + ncol * transform[1]
@@ -64,10 +68,10 @@ class FlowMorph:
     d8 : 2-D uint8 array, MERIT Hydro's flow directions (247 no data, 0 and 255 pits)
     upa : 2-D float array, the upstream area in km^2 (MERIT Hydro's own ``upa``): it chooses the targets and is the
         A of the convexity and of step 4; it also orders the donors of a confluence when ``seq_dfs`` is not given
-    transform : the six numbers of the grid (GDAL order), longitude and latitude in degrees, north up; its decimal
-        noise is removed first (:func:`flowmorph.grid.snap_transform`)
+    transform : the six numbers of the grid (GDAL order), longitude and latitude in degrees, north up; taken as
+        the C code takes it (:func:`flowmorph.grid.snap_transform`)
     elevation : 2-D float array, -9999 where there is none; needed for steps 1, 2 and 4
-    ring : optional (nrow + 2) x (ncol + 2) elevation, the grid with one more cell on every side, for the slope at
+    ring : optional (nrow + 2) x (ncol + 2) elevation, the grid with one more pixel on every side, for the slope at
         the grid's edge (see :func:`flowmorph.slope.local_slope`)
     crs : kept for writing
     seq_dfs, upg : optional index (FlowTopo's ``seq_dfs`` and the upstream pixel count); checked against the flow
@@ -82,12 +86,19 @@ class FlowMorph:
         if d8.ndim != 2:
             raise ValueError("the flow directions must be a 2-D grid")
         self.shape = d8.shape
+        # the C code counts pixels and ranks in 32 bits; a grid beyond that is outside what the two were compared on
+        if d8.shape[0] < 1 or d8.shape[1] < 1 or d8.shape[0] * d8.shape[1] > 2**31 - 1:
+            raise ValueError(f"the grid is {d8.shape[0]} x {d8.shape[1]}: it must hold at least one pixel and fewer "
+                             f"than 2^31")
         transform = tuple(float(value) for value in transform)
         if len(transform) != 6 or not all(math.isfinite(value) for value in transform):
             raise ValueError("the transform must be six finite numbers")
         if transform[2] != 0.0 or transform[4] != 0.0 or not transform[1] > 0.0 or not transform[5] < 0.0:
             raise ValueError("the grid must be north up with no rotation")
         self.transform = snap_transform(transform)
+        if not (self.transform[1] > 0.0 and self.transform[5] < 0.0):
+            # a pixel of 1e-13 degree is taken to 0 by the rounding to 1e-12
+            raise ValueError("the pixel size is too small: it is taken to 1e-12 of a degree")
         self._pixel_edges = pixel_edges_deg(transform)
         _check_longitude_latitude(self.transform, self.shape, crs)
         self.crs = crs
@@ -96,13 +107,17 @@ class FlowMorph:
         self.min_upstream_area_km2 = float(min_upstream_area_km2)
         if not (math.isfinite(self.min_upstream_area_km2) and self.min_upstream_area_km2 > 0.0):
             raise ValueError("min_upstream_area_km2 must be a finite area above 0 km2")
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            target_threshold = np.float32(self.min_upstream_area_km2)
+        if not (np.isfinite(target_threshold) and target_threshold > 0.0):
+            raise ValueError("min_upstream_area_km2 must remain finite and positive as float32")
         self.idxs_ds = _frozen(downstream_index(d8))
         self.upa = _kept(upa, np.float32)
         if self.upa.shape != self.shape:
             raise ValueError("upa must have the shape of the flow directions")
         network = self.idxs_ds >= 0
         with np.errstate(invalid="ignore"):
-            self.is_target = _frozen((np.isfinite(self.upa) & (self.upa >= np.float32(self.min_upstream_area_km2))
+            self.is_target = _frozen((np.isfinite(self.upa) & (self.upa >= target_threshold)
                                       ).reshape(-1) & network)
         if seq_dfs is None and upg is None:
             seq_dfs, upg = dfs_sequence(self.idxs_ds, self.upa)
@@ -123,18 +138,30 @@ class FlowMorph:
     def from_raster(cls, dir_path, upa_path, elv_path=None, ring_path=None, seq_dfs_path=None, upg_path=None,
                     **kwargs):
         """Read the grids from GeoTIFF files; ``ring_path`` is a larger elevation (the global one) the ring of one
-        cell round the grid is read from."""
+        pixel round the grid is read from."""
         d8, transform, crs = raster.read_d8(dir_path)
-        upa = raster.read_float(upa_path, d8.shape, transform)
-        elevation = None if elv_path is None else raster.read_float(elv_path, d8.shape, transform)
-        ring = None if ring_path is None else raster.read_ring(ring_path, d8.shape, transform)
-        seq_dfs = None if seq_dfs_path is None else raster.read_int(seq_dfs_path, d8.shape, transform)
-        upg = None if upg_path is None else raster.read_int(upg_path, d8.shape, transform)
+        upa = raster.read_float(upa_path, d8.shape, transform, expected_crs=crs)
+        elevation = None if elv_path is None else raster.read_float(elv_path, d8.shape, transform, expected_crs=crs)
+        ring = None if ring_path is None else raster.read_ring(ring_path, d8.shape, transform, expected_crs=crs)
+        seq_dfs = None if seq_dfs_path is None else raster.read_int(seq_dfs_path, d8.shape, transform, expected_crs=crs)
+        upg = None if upg_path is None else raster.read_int(upg_path, d8.shape, transform, expected_crs=crs)
         if upg is not None:
             upg[upg < 0] = 0
         return cls(d8, upa, transform, elevation=elevation, ring=ring, crs=crs, seq_dfs=seq_dfs, upg=upg, **kwargs)
 
     # ---- the four steps ----
+
+    def pixel_area(self):
+        """The area of every pixel in m^2 on the WGS84 ellipsoid, float32 (one value a row): the weight of a pixel in
+        the means and standard deviations of step 2, as in the C code."""
+        if "pixel_area" not in self._cache:
+            nrow, ncol = self.shape
+            area_of_row = np.empty(nrow, dtype=np.float32)
+            for row in range(nrow):
+                latitude = self.transform[3] + (float(row) + 0.5) * self.transform[5]
+                area_of_row[row] = np.float32(pixel_area_m2(latitude, self.transform[1], self.transform[5]))
+            self._cache["pixel_area"] = _frozen(np.repeat(area_of_row, ncol).reshape(nrow, ncol))
+        return self._cache["pixel_area"]
 
     def local_slope(self):
         """Step 1: Horn's slope in degrees, float32, -9999 where there is no elevation."""
@@ -150,7 +177,7 @@ class FlowMorph:
             if self.elevation is None:
                 raise ValueError("the terrain attributes need the elevation")
             values = upstream_terrain(self.seq_dfs, self.upg, self.idxs_ds, self.elevation, self.local_slope(),
-                                      self.is_target)
+                                      self.is_target, self.pixel_area())
             self._cache["terrain"] = {name: _frozen(values[name].reshape(self.shape)) for name in TERRAIN_NAMES}
         return dict(self._cache["terrain"])      # a new dict: replacing an entry leaves the cache alone
 
@@ -182,14 +209,18 @@ class FlowMorph:
         return {name: result[name] for name in ("slp",) + ATTRIBUTE_NAMES}
 
     def write(self, directory, names=None, suffix=""):
-        """Write attributes as float32 GeoTIFFs ``<name><suffix>.tif`` into a directory; all of them by default.
-        Returns the paths written."""
+        """Write attributes as float32 GeoTIFFs ``<name><suffix>.tif`` into a directory; all of them by default,
+        on the exact grid (:func:`flowmorph.grid.exact_transform`: 1/1200 of a degree on MERIT Hydro's).
+        Returns the paths written: in the order of the names when they are a list or a tuple, sorted when they are
+        any other collection (a set has no order of its own), slp and then ATTRIBUTE_NAMES by default."""
         os.makedirs(directory, exist_ok=True)
+        if names is not None and not isinstance(names, (list, tuple)):
+            names = sorted(names)               # a set has no order of its own
         values = self.attributes() if names is None else {name: self._one(name) for name in names}
         paths = []
         for name, grid in values.items():
             path = os.path.join(directory, f"{name}{suffix}.tif")
-            raster.write_float(path, grid, self.transform, self.crs)
+            raster.write_float(path, grid, exact_transform(self.transform), self.crs)
             paths.append(path)
         return paths
 

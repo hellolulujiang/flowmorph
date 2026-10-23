@@ -22,6 +22,7 @@ import numpy as np
 from numba import njit
 
 from .earth import degree_metres_x, degree_metres_y
+from .grid import north_up
 
 NODATA = -9999.0
 
@@ -84,13 +85,17 @@ def local_slope(elevation, transform, ring=None):
     if elevation.ndim != 2:
         raise ValueError("the elevation must be a 2-D grid")
     nrow, ncol = elevation.shape
+    # as the C code takes it (a transform already taken so stays as it is), and refused as the FlowMorph object and
+    # the C code's driver refuse it: a rotated or sheared grid (the kernel takes every grid as north up), a pixel
+    # of 1e-13 degree, which the rounding takes to 0 and the slope would divide by
+    transform = north_up(transform)
     if ring is None:
         ring = np.full((nrow + 2, ncol + 2), np.float32(NODATA), dtype=np.float32)
         ring[1:-1, 1:-1] = elevation
     else:
         ring = np.ascontiguousarray(ring, dtype=np.float32)
         if ring.shape != (nrow + 2, ncol + 2):
-            raise ValueError(f"the ring must be {nrow + 2} x {ncol + 2}: the grid and one cell on every side")
+            raise ValueError(f"the ring must be {nrow + 2} x {ncol + 2}: the grid and one pixel on every side")
     slope, mismatch_count = _slope_of_grid(elevation, ring, float(transform[3]), float(transform[1]),
                                            float(transform[5]))
     if mismatch_count:

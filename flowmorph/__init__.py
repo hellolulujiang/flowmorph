@@ -5,13 +5,16 @@ sixteen attributes (Table 3 of the FullBasin paper):
 
 * terrain, summed over the catchment's pixels: mean, lowest and highest elevation, the standard deviation of
   elevation, and the mean and standard deviation of the local slope (Horn 1981);
-* plan form, from the pixels on the catchment's boundary: the perimeter (Vossepoel & Smeulders 1982), the basin
-  length and width (Rigon et al. 1996), and the convexity (Willemin 2000);
-* shape, from those: relief, hypsometric integral, elongation ratio, Gravelius coefficient, circularity and the
+* plan form, from the pixels on the catchment's boundary: the perimeter (FlowMorph 1.0's Moore trace with the step
+  weights of Vossepoel & Smeulders 1982, taken on cells close to square on the ground), and the basin length and
+  width (Rigon et al. 1996) and the convexity (Willemin 2000), measured on the sphere with great-circle sides;
+* shape, from those: relief, hypsometric integral, elongation ratio, Gravelius compactness, circularity ratio and the
   lemniscate ratio of Chorley et al. (1957).
 
 The catchment of a pixel is a run of FlowTopo's depth-first ranks, [seq_dfs - upg + 1, seq_dfs], so the terrain
 attributes are one pass over the ranks and the boundary of each catchment is grown from the one upstream of it.
+This is the Python version of the C code of FlowMorph 1.1 and gives the same numbers on the same grid, with the
+slope's ring read from the same global elevation (README, "Same numbers as the C code").
 
 Quick start
 -----------
@@ -28,7 +31,7 @@ from .shape import SHAPE_NAMES, shape_arithmetic
 from .slope import local_slope
 from .terrain import TERRAIN_NAMES, upstream_terrain
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "FlowMorph", "ATTRIBUTE_NAMES", "MIN_UPSTREAM_AREA_KM2", "EARTH_MODELS",

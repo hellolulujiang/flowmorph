@@ -1,19 +1,19 @@
 """Step 4: attributes [11] .. [16], pixel by pixel from steps 2 and 3 and the upstream area; no traversal.
 
-    A      upstream area of the pixel (km^2);  P  perimeter [7] (km);  L  basin length L_par [8] (km)
+    A      upstream area of the pixel (km^2);  P  perimeter [7] (km);  L_b  basin length [8] (km)
 
     [11] relief                m  max_elv - min_elv   (Strahler 1952)
     [12] hypsometric_integral  -  (mean_elv - min_elv) / (max_elv - min_elv)   (Strahler 1952, in the
                                   elevation-relief ratio form); no data when the relief is 0
-    [13] elongation_ratio      -  (2 / L) sqrt(A / pi)   (Schumm's 1956 formula, with L_par as the length)
+    [13] elongation_ratio      -  (2 / L_b) sqrt(A / pi)   (Schumm's 1956 formula, with L_b as the length)
     [14] gravelius             -  P / (2 sqrt(pi A))   (Gravelius 1914)
     [15] circularity           -  4 pi A / P^2   (Miller 1953); gravelius = 1 / sqrt(circularity)
     [16] lemniscate_ratio      -  P_lemniscate / P   (Chorley, Malm & Pogorzelski 1957)
 
-[16].  The ideal lemniscate loop with the basin's area A and longest diameter L has k = pi L^2 / (4 A) (their eq. 1)
-and perimeter P_lemniscate = 2 L E(K), K^2 = 1 - 1/k^2 (eqs. 2-3), E the complete elliptic integral of the second
-kind.  A catchment whose outlet is not at its tip can be fuller than the circle of diameter L, k < 1; the same
-curve rho = L cos(k theta) then has perimeter (2 L / k) E(K'), K'^2 = 1 - k^2, and stays one loop through the
+[16].  The ideal lemniscate loop with the basin's area A and length L_b has k = pi L_b^2 / (4 A) (their eq. 1)
+and perimeter P_lemniscate = 2 L_b E(K), K^2 = 1 - 1/k^2 (eqs. 2-3), E the complete elliptic integral of the second
+kind.  A catchment whose outlet is not at its tip can be fuller than the circle of diameter L_b, k < 1; the same
+curve rho = L_b cos(k theta) then has perimeter (2 L_b / k) E(K'), K'^2 = 1 - k^2, and stays one loop through the
 outlet while k >= 1/2.  For k < 1/2 it crosses itself and the pixel is written as no data.
 """
 
@@ -25,7 +25,7 @@ SHAPE_NAMES = ("relief", "hypsometric_integral", "elongation_ratio", "gravelius"
 
 
 def _lemniscate_ratio(length_km, area_km2, perimeter_km):
-    """[16] for arrays of float64 with A > 0, L > 0 and P > 0; no data where k < 1/2."""
+    """[16] for arrays of float64 with A > 0, L_b > 0 and P > 0; no data where k < 1/2."""
     k = np.pi * length_km * length_km / (4.0 * area_km2)
     ratio = np.full(k.shape, NODATA, dtype=np.float64)
     at_least_one = k >= 1.0
@@ -54,6 +54,16 @@ def shape_arithmetic(upa, perimeter_km, basin_length_km, mean_elv, min_elv, max_
     max_elevation = np.asarray(max_elv, dtype=np.float32)
     target = np.asarray(is_target, dtype=bool)
     result = {name: np.full(area.shape, nodata32, dtype=np.float32) for name in SHAPE_NAMES}
+
+    # every input at a target is a number or the no data: an infinity or a NaN there is refused, as the C code
+    # refuses the region (it would otherwise come out as a ratio of 0 or infinity)
+    for name, values in (("upa", area), ("perimeter_km", perimeter), ("basin_length_km", length),
+                         ("mean_elv", mean_elevation), ("min_elv", min_elevation), ("max_elv", max_elevation)):
+        if values.shape != area.shape:
+            raise ValueError(f"{name} does not have the shape of the upstream area")
+        if not np.isfinite(values[target]).all():
+            raise ValueError(f"{name} is not finite at {int((~np.isfinite(values[target])).sum())} of the pixels the "
+                             f"attributes are written for")
 
     area64 = area.astype(np.float64)
     perimeter64 = perimeter.astype(np.float64)

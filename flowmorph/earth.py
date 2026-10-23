@@ -1,21 +1,23 @@
-"""Lengths and areas on the earth.
+"""Lengths and areas on the earth, as the C code of FlowMorph takes them.
 
-Two models.  ``"wgs84"`` (the default) is the WGS84 ellipsoid: the metres of one degree from its
+Two models.  ``"wgs84"`` (the default of FlowMorph 1.1) is the WGS84 ellipsoid: the metres of one degree from its
 meridian and prime-vertical radii, a great-circle distance on the authalic sphere scaled to the ellipsoid along the
 bearing at the mid-latitude, and polygon areas from the ellipsoid's zone function.  ``"sphere"`` is the authalic
 sphere of radius 6 371 007.181 m, on which the FullBasin v1.0 layers were measured.
 
 The slope of :mod:`flowmorph.slope` does not depend on the model: it takes the metres of one degree from the fixed
-series :func:`degree_metres_x` and :func:`degree_metres_y`.
+series :func:`degree_metres_x` and :func:`degree_metres_y`, as the C code does.
 
-Every function here is compiled with numba and takes the model as an integer (:data:`WGS84` or :data:`SPHERE`), so
-that the kernels can call it; :func:`model_code` turns the name into the integer.
+The functions the kernels call are compiled with numba, and those that depend on the model take it as an integer
+(:data:`WGS84` or :data:`SPHERE`); :func:`model_code` turns the name into the integer.
 """
 
 import math
 
 import numpy as np
 from numba import njit
+
+from .clib import sincos
 
 WGS84 = 0
 SPHERE = 1
@@ -64,16 +66,18 @@ def metres_per_degree(latitude_deg, model):
     phi = latitude_deg * to_rad
     if model == SPHERE:
         return R_AUTHALIC * to_rad, R_AUTHALIC * to_rad * math.cos(phi)
-    s2 = math.sin(phi) * math.sin(phi)
+    sin_phi, cos_phi = sincos(phi)                      # one call for the two, as the C binary on macOS takes them
+    s2 = sin_phi * sin_phi
     w = math.sqrt(1.0 - WGS84_E2 * s2)
     meridian_radius = WGS84_A * (1.0 - WGS84_E2) / (w * w * w)
     prime_vertical_radius = WGS84_A / w
-    return meridian_radius * to_rad, prime_vertical_radius * math.cos(phi) * to_rad
+    return meridian_radius * to_rad, prime_vertical_radius * cos_phi * to_rad
 
 
 @njit
 def shortest_longitude_difference(longitude_from, longitude_to):
-    """lon_to - lon_from taken the short way round, in (-180, 180]; exactly +-180 is left as it is."""
+    """lon_to - lon_from taken the short way round: one turn is added or taken off when the difference passes
+    180 degrees either way, so two longitudes less than a turn apart give a difference in [-180, 180]."""
     difference = longitude_to - longitude_from
     if not math.isfinite(difference):
         return difference
@@ -85,31 +89,53 @@ def shortest_longitude_difference(longitude_from, longitude_to):
 
 
 @njit
-def distance_m(latitude_1, longitude_1, latitude_2, longitude_2, model):
-    """Distance between two points in metres: the great circle on the authalic sphere, and on the ellipsoid that
-    length scaled by the ratio of the ellipsoidal to the spherical arc along the bearing at the mid-latitude."""
+def distance_with_cosines_m(latitude_1, longitude_1, latitude_2, longitude_2, cos_latitude_1, cos_latitude_2, model):
+    """:func:`distance_m` with the cosines of the two latitudes given (a grid keeps them in a table, one a row)."""
     to_rad = math.pi / 180.0
     dlat = (latitude_2 - latitude_1) * to_rad
     dlon = shortest_longitude_difference(longitude_1, longitude_2) * to_rad
     la1 = latitude_1 * to_rad
     la2 = latitude_2 * to_rad
     a = (math.sin(dlat / 2.0) * math.sin(dlat / 2.0)
-         + math.cos(la1) * math.cos(la2) * math.sin(dlon / 2.0) * math.sin(dlon / 2.0))
+         + cos_latitude_1 * cos_latitude_2 * math.sin(dlon / 2.0) * math.sin(dlon / 2.0))
+    # rounding must not carry a above 1 (a point and the point opposite it: one unit in the last place above 1 at
+    # one latitude in 25).  Below 0 a cannot come by rounding (both terms are squares times cosines of latitudes,
+    # none negative): a cosine of a latitude beyond a pole was given, and the distance is then not a number, as in
+    # the C code
+    if a > 1.0:
+        a = 1.0
     d_sphere = R_AUTHALIC * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     if model == SPHERE or d_sphere <= 0.0:
         return d_sphere
     phim = 0.5 * (la1 + la2)
-    s2 = math.sin(phim) * math.sin(phim)
+    # the sine and the cosine of one angle together, as the C code's compiler takes them (clib.sincos): taken apart
+    # the sine differs in its last bit at some latitudes (26 degrees), and this length is under every plan-form
+    # length (metres_per_degree takes them together)
+    sin_phim, cos_phim = sincos(phim)
+    s2 = sin_phim * sin_phim
     w = math.sqrt(1.0 - WGS84_E2 * s2)
     meridian_radius = WGS84_A * (1.0 - WGS84_E2) / (w * w * w)
     prime_vertical_radius = WGS84_A / w
-    ex = prime_vertical_radius * math.cos(phim) * dlon
+    ex = prime_vertical_radius * cos_phim * dlon
     ey = meridian_radius * dlat
-    sx = R_AUTHALIC * math.cos(phim) * dlon
+    sx = R_AUTHALIC * cos_phim * dlon
     sy = R_AUTHALIC * dlat
     num = math.sqrt(ex * ex + ey * ey)
     den = math.sqrt(sx * sx + sy * sy)
     return d_sphere * (num / den) if den > 0.0 else d_sphere
+
+
+@njit
+def distance_m(latitude_1, longitude_1, latitude_2, longitude_2, model):
+    """Distance between two points in metres: the great circle on the authalic sphere, and on the ellipsoid that
+    length scaled by the ratio of the ellipsoidal to the spherical arc along the bearing at the mid-latitude.
+
+    Taken in one piece it is exact for a line of a few kilometres and drifts from the geodesic on a long one (by
+    2e-9 at 10 km, 5e-8 at 50 km, 2.5e-4 at 3,700 km), so the lengths of :mod:`flowmorph.sphere` add it up in
+    pieces of at most 5 km along the great circle."""
+    to_rad = math.pi / 180.0
+    return distance_with_cosines_m(latitude_1, longitude_1, latitude_2, longitude_2,
+                                   math.cos(latitude_1 * to_rad), math.cos(latitude_2 * to_rad), model)
 
 
 @njit
@@ -170,5 +196,5 @@ def pixel_area_m2(latitude_deg, x_resolution_deg, y_resolution_deg):
 __all__ = [
     "WGS84", "SPHERE", "EARTH_MODELS", "model_code",
     "degree_metres_x", "degree_metres_y", "metres_per_degree", "shortest_longitude_difference",
-    "distance_m", "lonlat_polygon_area_m2", "pixel_area_m2",
+    "distance_m", "distance_with_cosines_m", "lonlat_polygon_area_m2", "pixel_area_m2",
 ]

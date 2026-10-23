@@ -5,7 +5,7 @@ The flow directions are in the MERIT Hydro convention: a power of two clockwise 
 its basin), 247 no data.
 
 THE INDEX.  The pixels of each basin are numbered depth first from the outlet, the larger upstream area first at
-every confluence (ties: the smaller cell index), and the numbering is then turned within the basin so that the
+every confluence (ties: the smaller pixel index), and the numbering is then turned within the basin so that the
 outlet takes the highest rank of the basin's run.  That is FlowTopo's ``seq_dfs``.  A pixel's catchment, the pixel
 included, is then the run of ranks
 
@@ -14,11 +14,11 @@ included, is then the run of ranks
 where ``upg`` is the number of pixels upstream of p, p included.  Every question FlowMorph asks of a catchment
 ("is q upstream of p") is two comparisons on that run.
 
-:func:`check_index` checks a given ``seq_dfs`` and ``upg`` against the flow directions before they are relied on:
-every pixel of the network has one rank, a pixel's rank is below the rank of the pixel it
-flows into, and going through the ranks from 0 up, the runs already seen and not yet taken lie side by side exactly
-under the run of the pixel that takes them and all flow into it.  By induction from the sources the run of every
-pixel then holds exactly its upstream pixels.
+:func:`check_index` checks a given ``seq_dfs`` and ``upg`` against the flow directions before they are relied on,
+as the C code does: every pixel of the network has one rank, the rank of a pixel that is not a pit is below the
+rank of the pixel it flows into, and going through the ranks from 0 up, the runs already seen and not yet taken lie
+side by side exactly under the run of the pixel that takes them and all flow into it.  By induction from the
+sources the run of every pixel then holds exactly its upstream pixels.
 """
 
 import numpy as np
@@ -33,8 +33,8 @@ _COL_OFFSETS = np.array([1, 1, 0, -1, -1, -1, 0, 1], dtype=np.int64)
 
 @njit
 def _downstream_of_grid(d8, nrow, ncol):
-    """The flat index each cell flows into (its own at a pit), -1 off the network; the first bad cell and the
-    reason (0 none, 1 a code that is not D8, 2 a flow out of the grid, 3 a flow into a cell off the network)."""
+    """The flat index each pixel flows into (its own at a pit), -1 off the network; the first bad pixel and the
+    reason (0 none, 1 a code that is not D8, 2 a flow out of the grid, 3 a flow into a pixel off the network)."""
     idxs_ds = np.full(nrow * ncol, -1, dtype=np.int64)
     for row in range(nrow):
         for col in range(ncol):
@@ -64,8 +64,8 @@ def _downstream_of_grid(d8, nrow, ncol):
 
 
 def downstream_index(d8):
-    """The flat index each cell of a 2-D MERIT D8 grid flows into: its own at a pit (0 or 255), -1 off the network
-    (247).  A code that is not D8, a flow out of the grid and a flow into a cell off the network are refused: the
+    """The flat index each pixel of a 2-D MERIT D8 grid flows into: its own at a pit (0 or 255), -1 off the network
+    (247).  A code that is not D8, a flow out of the grid and a flow into a pixel off the network are refused: the
     catchment of every pixel must lie inside the grid."""
     d8 = np.asarray(d8)
     if d8.ndim != 2:
@@ -78,14 +78,14 @@ def downstream_index(d8):
         row, col = divmod(int(bad_cell), ncol)
         what = {1: f"has the code {int(d8[row, col])}, which is not a MERIT D8 code",
                 2: "flows out of the grid",
-                3: "flows into a cell without flow direction (247)"}[reason]
-        raise ValueError(f"cell (row {row}, col {col}) {what}; the grid must hold whole basins")
+                3: "flows into a pixel without flow direction (247)"}[reason]
+        raise ValueError(f"pixel (row {row}, col {col}) {what}; the grid must hold whole basins")
     return idxs_ds
 
 
 @njit
 def _dfs_sequence(idxs_ds, upa):
-    """seq_dfs and upg of every cell (-1 and 0 off the network), the pixels ranked and the network pixels."""
+    """seq_dfs and upg of every pixel (-1 and 0 off the network), the pixels ranked and the network pixels."""
     size = idxs_ds.size
     donor_offset = np.zeros(size + 1, dtype=np.int64)
     network_pixel_count = 0
@@ -105,7 +105,7 @@ def _dfs_sequence(idxs_ds, upa):
         if downstream >= 0 and downstream != cell:
             donors[fill_position[downstream]] = cell
             fill_position[downstream] += 1
-    # the donors of each cell by upstream area, the larger first; a stable insertion sort keeps the smaller index
+    # the donors of each pixel by upstream area, the larger first; a stable insertion sort keeps the smaller index
     # first among equal areas
     for cell in range(size):
         first = donor_offset[cell]
@@ -146,7 +146,7 @@ def _dfs_sequence(idxs_ds, upa):
 
     upg = np.zeros(size, dtype=np.int64)
     if basin_start != network_pixel_count:
-        return seq, upg, basin_start, network_pixel_count          # cells in a cycle reach no pit
+        return seq, upg, basin_start, network_pixel_count          # pixels in a cycle reach no pit
     # upg: the pixels upstream of each pixel, itself included, summed downstream in rank order
     cell_of_rank = np.empty(max(network_pixel_count, 1), dtype=np.int64)
     for cell in range(size):
@@ -168,20 +168,20 @@ def dfs_sequence(idxs_ds, upa):
     ----------
     idxs_ds : 1-D int array, from :func:`downstream_index`
     upa : 1-D float array of the same size, the upstream area that orders the donors of a confluence; it must be
-        finite and positive on every cell of the network.
+        finite and positive on every pixel of the network.
 
     Returns
     -------
-    seq_dfs : int32 array, the rank of every cell, -1 off the network
+    seq_dfs : int32 array, the rank of every pixel, -1 off the network
     upg : int64 array, 0 off the network
     """
     idxs_ds = np.ascontiguousarray(idxs_ds, dtype=np.int64)
     upa = np.ascontiguousarray(upa, dtype=np.float32).reshape(-1)
     if upa.size != idxs_ds.size:
-        raise ValueError("upa must hold one value for every cell")
+        raise ValueError("upa must hold one value for every pixel")
     network_upa = upa[idxs_ds >= 0]
     if network_upa.size and not np.all(np.isfinite(network_upa) & (network_upa > 0)):
-        raise ValueError("upa must be finite and positive on every cell of the network: it orders the donors of "
+        raise ValueError("upa must be finite and positive on every pixel of the network: it orders the donors of "
                          "a confluence")
     if np.count_nonzero(idxs_ds >= 0) > np.iinfo(np.int32).max:
         raise ValueError("the network holds more pixels than int32 ranks can number")
@@ -194,7 +194,7 @@ def dfs_sequence(idxs_ds, upa):
 
 @njit
 def _check_index(seq, upg, idxs_ds, pixel_count):
-    """0 when the index holds, else a reason code and the rank or cell it failed at."""
+    """(reason, where): (0, -1) when the index holds, else a reason code and the rank or pixel it failed at."""
     size = seq.size
     seen = np.zeros(pixel_count, dtype=np.bool_)
     upstream_count_of_rank = np.zeros(pixel_count, dtype=np.int64)
@@ -246,7 +246,7 @@ def _check_index(seq, upg, idxs_ds, pixel_count):
 
 
 _INDEX_FAILURES = {
-    1: "a cell off the network has a rank or an upstream count",
+    1: "a pixel off the network has a rank or an upstream count",
     2: "a pixel of the network has no rank in 0 .. n - 1",
     3: "a rank is given twice",
     4: "an upstream count would start the run below rank 0",
@@ -263,7 +263,7 @@ def check_index(seq_dfs, upg, idxs_ds):
     upg = np.ascontiguousarray(upg).reshape(-1)
     idxs_ds = np.ascontiguousarray(idxs_ds, dtype=np.int64)
     if seq_dfs.size != idxs_ds.size or upg.size != idxs_ds.size:
-        raise ValueError("seq_dfs and upg must hold one value for every cell")
+        raise ValueError("seq_dfs and upg must hold one value for every pixel")
     if seq_dfs.dtype.kind not in "iu" or upg.dtype.kind not in "iu":
         raise ValueError("seq_dfs and upg must be whole numbers")
     pixel_count = int(np.count_nonzero(idxs_ds >= 0))

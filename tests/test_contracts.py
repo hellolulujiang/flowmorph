@@ -1,5 +1,5 @@
-"""What each piece promises, on small grids made up for the purpose (the numbers are checked on the real basin in
-test_example.py; these only check the rules and the refusals)."""
+"""What each piece promises, on small grids made up for the purpose (the numbers of the real basin are checked in
+test_example.py; these check the rules, the refusals and the formulas on made-up numbers)."""
 
 import math
 
@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import flowmorph
+from ellipsoid_area import area_of_rows
 from flowmorph import earth
 from flowmorph.grid import pixel_edges_deg, snap_transform
 from flowmorph.network import check_index, dfs_sequence, downstream_index
@@ -16,7 +17,7 @@ TRANSFORM = (10.0, 1.0 / 1200.0, 0.0, 50.0, 0.0, -1.0 / 1200.0)
 
 
 def _line_grid():
-    """Four cells flowing east into a pit, with a fifth cell draining into the second from the north."""
+    """Four pixels flowing east into a pit, with a fifth pixel draining into the second from the north."""
     d8 = np.full((2, 4), 247, dtype=np.uint8)
     d8[1, :3] = 1        # east
     d8[1, 3] = 0         # river mouth
@@ -83,7 +84,7 @@ def test_the_larger_donor_is_visited_first():
 
 
 def test_a_cycle_is_refused():
-    d8 = np.array([[1, 16]], dtype=np.uint8)        # two cells pointing at each other
+    d8 = np.array([[1, 16]], dtype=np.uint8)        # two pixels pointing at each other
     idxs_ds = downstream_index(d8)
     with pytest.raises(ValueError, match="cycle"):
         dfs_sequence(idxs_ds, np.ones(2, dtype=np.float32))
@@ -186,6 +187,26 @@ def test_the_object_refuses_a_rotated_or_south_up_grid():
         flowmorph.FlowMorph(d8, upa, (10.0, 1 / 1200, 0.0, 50.0, 0.0, 1 / 1200))
 
 
+def test_the_entries_called_on_their_own_refuse_a_rotated_grid():
+    """as the object does: the slope of a sheared grid was computed as if the grid were north up"""
+    from flowmorph.boundary import boundary_walk
+    from flowmorph.earth import model_code
+    from flowmorph.slope import local_slope
+    sheared = (10.0, 0.01, 0.01, 47.0, 0.0, -0.01)
+    elevation = np.tile(np.array([0.0, 100.0, 200.0], dtype=np.float32), (3, 1))
+    with pytest.raises(ValueError, match="north up"):
+        local_slope(elevation, sheared)
+    with pytest.raises(ValueError, match="six finite"):
+        local_slope(elevation, (10.0, 0.01, 0.0, float("nan"), 0.0, -0.01))
+    assert local_slope(elevation, (10.0, 0.01, 0.0, 47.0, 0.0, -0.01)).shape == (3, 3)
+    one = np.zeros(1, dtype=np.int64)
+    area = np.ones(1, dtype=np.float32)
+    target = np.ones(1, dtype=bool)
+    model = model_code("wgs84")
+    with pytest.raises(ValueError, match="north up"):
+        boundary_walk(one, one + 1, area, target, (1, 1), sheared, model)
+
+
 def test_the_index_must_come_whole():
     d8 = _line_grid()
     upa = np.ones(d8.shape, dtype=np.float32)
@@ -201,8 +222,58 @@ def test_a_small_grid_runs_through():
     values = fm.attributes()
     assert set(values) == {"slp"} | set(flowmorph.ATTRIBUTE_NAMES)
     assert float(values["max_elv"][1, 3]) == 40.0 and float(values["min_elv"][1, 3]) == 5.0
-    assert float(values["mean_elv"][1, 3]) == pytest.approx(21.0)
+    # the mean is weighted by pixel area: one pixel of the upper row (30 m) and four of the lower (40, 20, 10, 5 m)
+    area = fm.pixel_area().astype(np.float64)
+    by_area = (area[0, 1] * 30.0 + area[1, 0] * (40.0 + 20.0 + 10.0 + 5.0)) / (area[0, 1] + 4.0 * area[1, 0])
+    assert float(values["mean_elv"][1, 3]) == pytest.approx(by_area, rel=1e-6)
+    assert by_area != 21.0 and abs(by_area - 21.0) < 1e-3          # the plain mean is 21; the rows are 1/1200 degree apart
     assert np.all(values["mean_elv"][0, [0, 2, 3]] == -9999.0)
+
+
+def test_the_means_of_the_terrain_are_weighted_by_pixel_area():
+    """One column of 2,000 pixels of 0.01 degree running south from 60 N to 40 N, the elevation rising a metre a
+    pixel towards the south.  A pixel at 40 N is half as large again as one at 60 N: the mean over the catchment's
+    area lies 0.69 degree south of the middle row, 69 m above the plain mean of the pixels."""
+    nrow = 2000
+    d8 = np.full((nrow, 1), 4, dtype=np.uint8)
+    d8[nrow - 1, 0] = 0
+    upa = (np.arange(1, nrow + 1, dtype=np.float32) * np.float32(0.6)).reshape(nrow, 1)
+    elevation = np.arange(nrow, dtype=np.float32).reshape(nrow, 1)
+    fm = flowmorph.FlowMorph(d8, upa, (10.0, 0.01, 0.0, 60.0, 0.0, -0.01), elevation=elevation, min_upstream_area_km2=10.0)
+    terrain = fm.upstream_terrain()
+    # the weights: the area of every row integrated here, not the package's own, kept as float32 as the package keeps it
+    area = area_of_rows(60.0, -0.01, 0.01, nrow).astype(np.float32).astype(np.float64)
+    z = np.arange(nrow, dtype=np.float64)
+    mean = (area * z).sum() / area.sum()
+    std = np.sqrt((area * (z - mean) ** 2).sum() / area.sum())
+    assert float(terrain["mean_elv"][nrow - 1, 0]) == pytest.approx(mean, rel=1e-6)
+    assert float(terrain["elv_std"][nrow - 1, 0]) == pytest.approx(std, rel=1e-6)
+    assert 68.0 < mean - z.mean() < 70.0                       # the plain mean of the pixels is 999.5
+    assert float(terrain["min_elv"][nrow - 1, 0]) == 0.0 and float(terrain["max_elv"][nrow - 1, 0]) == nrow - 1
+    # the package's areas are those of the WGS84 ellipsoid at the rows' own latitudes, one value a row
+    own = fm.pixel_area()
+    assert own.dtype == np.float32 and own.shape == (nrow, 1)
+    np.testing.assert_allclose(own[:, 0].astype(np.float64), area_of_rows(60.0, -0.01, 0.01, nrow), rtol=2e-7, atol=0)
+    assert area[nrow // 2] == pytest.approx(7.96e5, rel=5e-3)   # a pixel of 0.01 degree at 50 N is 0.796 km2
+
+
+def test_a_network_pixel_without_a_slope_is_refused():
+    """In 1.0 a network pixel whose slope was -9999 entered the mean slope as 0 degrees with its whole weight; it
+    is refused, as a pixel without an elevation is."""
+    from flowmorph.terrain import upstream_terrain
+    d8 = np.full((4, 1), 4, dtype=np.uint8)
+    d8[3, 0] = 0
+    idxs_ds = downstream_index(d8)
+    seq, upg = dfs_sequence(idxs_ds, np.ones(4, dtype=np.float32))
+    elevation = np.array([40.0, 30.0, 20.0, 10.0], dtype=np.float32)
+    area = np.ones(4, dtype=np.float32)
+    target = np.ones(4, dtype=bool)
+    whole = upstream_terrain(seq, upg, idxs_ds, elevation, np.array([4.0, 3.0, 2.0, 1.0], dtype=np.float32), target, area)
+    assert float(whole["mean_slp"][3]) == pytest.approx(2.5)
+    for missing in (-9999.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="no finite slope"):
+            upstream_terrain(seq, upg, idxs_ds, elevation, np.array([4.0, missing, 2.0, 1.0], dtype=np.float32), target,
+                             area)
 
 
 def test_a_threshold_that_is_not_a_positive_area_is_refused():
