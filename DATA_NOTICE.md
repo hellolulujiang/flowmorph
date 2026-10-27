@@ -2,7 +2,8 @@
 
 The MIT terms in [`LICENSE`](LICENSE) cover the code and the documentation in this repository:
 `flowmorph/`, `tests/` (but not `tests/reference/expected.npz` and `tests/reference/expected_perimeter.npz`),
-and the files at the top level. They do not cover the files in `data/` and those two files.
+and the files at the top level. They do not cover the files in `data/`, those two files, and the three figures in
+`docs/media/`.
 
 `data/dir_example.tif`, `data/upa_example.tif` and `data/elv_example.tif` are an excerpt of MERIT Hydro v1.0.1, 376 rows
 by 434 columns at 3 arc-seconds around one basin in Tasmania (Yamazaki et al., 2019,
@@ -13,3 +14,7 @@ redistributed here under the same two licences, either of them at your choice, f
 its authors. `tests/reference/expected.npz` and `tests/reference/expected_perimeter.npz` hold reference values computed
 from MERIT Hydro over the same window, and carry the same terms. `tests/reference/expected_perimeter_synthetic.npz`
 holds reference perimeters of made-up catchments, and is not drawn from MERIT Hydro.
+
+The three figures in `docs/media/` are Figures 7, 8 and 9 of the FullBasin paper as revised for Earth System Science
+Data (discussion paper: Jiang et al., <https://doi.org/10.5194/essd-2026-402>), drawn on one basin of MERIT Hydro and
+MERIT DEM (Yamazaki et al., 2017, <https://doi.org/10.1002/2017GL072874>), and carry the terms of those data.
