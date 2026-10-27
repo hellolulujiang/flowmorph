@@ -3,7 +3,7 @@
 A grid comes back as its array, the six numbers of its transform (GDAL order) and its CRS.  Pixels a file marks
 invalid (its declared no-data value) are set to the value FlowMorph reads as no data: 247 for the flow directions,
 -9999 for a float grid, -1 for an index.  A mask band or an alpha band may hide only such pixels: one that hides
-pixels holding values is refused, as the C programs would read those values.
+pixels holding values is refused.
 """
 
 import math
@@ -42,12 +42,9 @@ def _check_geographic(dataset, path, expected_crs=None):
 
 
 def _refuse_a_mask_over_values(path, dataset, values, mask, own_nodata):
-    """A file's mask may hide only pixels that hold no data: the file's declared no-data value, or ``own_nodata``,
-    the value this package and the C code take for no data in that grid (247 in the directions, -9999 in a float
-    grid, -1 in an index).  The C programs read the values and know no mask: an internal mask band or an alpha band
-    over pixels that hold values would give this package another network, or other attributes, than the C code reads
-    from the same file, without a word.  A file whose mask is its declared no-data value, as
-    MERIT Hydro's are, is read as its values say."""
+    """A file's mask may hide only pixels that hold no data: a value that is not finite, the file's declared no-data
+    value or ``own_nodata`` (247 in the directions, -9999 in a float grid, -1 in an index).  A mask band or an alpha
+    band over pixels that hold values is refused: it would change the network or the attributes without a word."""
     hidden = mask == 0
     if not hidden.any():
         return
@@ -68,17 +65,13 @@ def _refuse_a_mask_over_values(path, dataset, values, mask, own_nodata):
             pass
     if np.any(hidden & holds_a_value):
         raise ValueError(f"{path}: its mask hides {int(np.count_nonzero(hidden & holds_a_value))} pixels that hold "
-                         "values. The values are what the C programs read, so the two would not agree: write the "
-                         "no-data value into those pixels, or remove the mask")
+                         "values. Write the no-data value into those pixels, or remove the mask")
 
 
 def _holds_the_declared_no_data(dataset, values):
-    """The pixels that hold the file's declared no-data value, whatever a mask says of them.  This package judges by
-    the value, as the C programs do with theirs (-9999, 247): a mask band may call valid a pixel that holds the
-    declared value, and it would be read as an elevation, an area or a rank.  A file whose mask is meant to give
-    such a pixel back as data is therefore not read as its mask says: the value must not be used for data.  None
-    when the file declares no value, declares NaN (not finite: taken out as such) or declares a value its own type
-    cannot hold."""
+    """The pixels that hold the file's declared no-data value, whatever a mask says of them: the value is never read
+    as data.  None when the file declares no value, declares NaN (not finite: taken out as such) or declares a value
+    its own type cannot hold."""
     nodata = dataset.nodata
     if nodata is None or nodata != nodata:
         return None
@@ -153,8 +146,7 @@ def read_int(path, shape=None, transform=None, expected_crs=None):
 def _same_grid(first, second):
     if len(first) != 6 or len(second) != 6 or not all(math.isfinite(value) for value in (*first, *second)):
         return False
-    # as the C code takes them: two headers that write one grid with different rounding (1/1200 and 0.00083333) are
-    # one grid
+    # two headers that write one grid with different rounding (1/1200 and 0.00083333) are one grid
     first = snap_transform(first)
     second = snap_transform(second)
     size = abs(second[1])

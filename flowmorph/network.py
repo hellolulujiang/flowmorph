@@ -14,11 +14,11 @@ included, is then the run of ranks
 where ``upg`` is the number of pixels upstream of p, p included.  Every question FlowMorph asks of a catchment
 ("is q upstream of p") is two comparisons on that run.
 
-:func:`check_index` checks a given ``seq_dfs`` and ``upg`` against the flow directions before they are relied on,
-as the C code does: every pixel of the network has one rank, the rank of a pixel that is not a pit is below the
-rank of the pixel it flows into, and going through the ranks from 0 up, the runs already seen and not yet taken lie
-side by side exactly under the run of the pixel that takes them and all flow into it.  By induction from the
-sources the run of every pixel then holds exactly its upstream pixels.
+:func:`check_index` checks a given ``seq_dfs`` and ``upg`` against the flow directions before they are relied on:
+every pixel of the network has one rank, the rank of a pixel that is not a pit is below the rank of the pixel it
+flows into, and going through the ranks from 0 up, the runs already seen and not yet taken lie side by side exactly
+under the run of the pixel that takes them and all flow into it.  By induction from the sources the run of every
+pixel then holds exactly its upstream pixels.
 """
 
 import numpy as np

@@ -55,8 +55,8 @@ def shape_arithmetic(upa, perimeter_km, basin_length_km, mean_elv, min_elv, max_
     target = np.asarray(is_target, dtype=bool)
     result = {name: np.full(area.shape, nodata32, dtype=np.float32) for name in SHAPE_NAMES}
 
-    # every input at a target is a number or the no data: an infinity or a NaN there is refused, as the C code
-    # refuses the region (it would otherwise come out as a ratio of 0 or infinity)
+    # every input at a target is a number or the no data: an infinity or a NaN there is refused (it would come out
+    # as a ratio of 0 or infinity)
     for name, values in (("upa", area), ("perimeter_km", perimeter), ("basin_length_km", length),
                          ("mean_elv", mean_elevation), ("min_elv", min_elevation), ("max_elv", max_elevation)):
         if values.shape != area.shape:

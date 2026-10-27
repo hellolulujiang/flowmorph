@@ -9,22 +9,17 @@
 
 Every pixel counts with its area a (the WGS84 area of a pixel of its row, kept as float32): mean = sum(a z) / sum(a),
 std = sqrt(sum(a z^2) / sum(a) - mean^2), 0 when that is not above 0, no data when fewer than two pixels are in the
-catchment.  On a longitude-latitude grid a pixel shrinks with the cosine of its latitude.  In FlowMorph 1.0
-every pixel counted once (a plain mean over pixels), and a catchment that spans many degrees of latitude came
-out too low or too high by tens of metres (the Yenisei at its mouth: 659.6 m against 726.1 m by area); of the basins
-of MERIT Hydro of 10 km^2 and more, 98.7 % change by less than 1 m.  The elevation and the slope must cover the
-network: a network pixel without a finite elevation or without a finite slope is refused, as the C code refuses it
-(in 1.0 a pixel whose slope was -9999 entered the mean slope as 0 degrees).  The standard deviation is
-the difference of two moments held in doubles, which resolves a centimetre to 2 % and nothing below a few
-millimetres: a level surface of ten million pixels at 3,800 m comes out between 0 and 2 mm.  Written where the
-upstream area is at least the target threshold (10 km^2), -9999 elsewhere.
+catchment.  On a longitude-latitude grid a pixel shrinks with the cosine of its latitude.  The elevation and the
+slope must cover the network: a network pixel without an elevation or without a slope (-9999 or not finite) is
+refused.  The standard deviation is the difference of two moments held in doubles, which resolves a centimetre to
+2 % and nothing below a few millimetres: a level surface of ten million pixels at 3,800 m comes out between 0 and
+2 mm.  Written where the upstream area is at least the target threshold (10 km^2), -9999 elsewhere.
 
 HOW.  The catchment of p is the run of ranks [seq_dfs(p) - upg(p) + 1, seq_dfs(p)], and every pixel of it but p
 has a lower rank than p.  So the ranks are taken from 0 up; when the pixel of rank r is reached, the catchments summed
 and not yet taken that lie in its run are exactly those of the pixels flowing into it, on the top of a stack: they
 are taken off and added to r's own values, and r's sums go on the stack for the pixel r flows into.  A pit's sums
-are finished and are not put back.  The sums are added in the order the C code adds them, so the same index gives
-the same numbers.
+are finished and are not put back.
 """
 
 import numpy as np
@@ -78,7 +73,7 @@ def _upstream_terrain(elevation_of_rank, slope_of_rank, weight_of_rank, first_ra
             if stack_elevation_max[top] > elevation_max:
                 elevation_max = stack_elevation_max[top]
         if is_target_of_rank[rank] and count > 0 and weight_sum > 0.0:
-            area_sum = weight_sum                  # the sum of the areas divides, as the C code's weight_sum
+            area_sum = weight_sum                  # the sum of the areas divides
             mean_elevation = elevation_sum / area_sum
             mean_slope = slope_sum / area_sum
             outputs[rank, 0] = np.float32(mean_elevation)
@@ -112,7 +107,7 @@ def upstream_terrain(seq_dfs, upg, idxs_ds, elevation, slope, is_target, pixel_a
 
     ``seq_dfs``, ``upg`` and ``idxs_ds`` are the checked index of :mod:`flowmorph.network`; ``elevation`` and
     ``slope`` (step 1) are float arrays over the pixels; ``is_target`` marks the pixels written; ``pixel_area`` is
-    the area of every pixel (any unit, the same for all; float32 as the C code keeps it), the weight of its values.
+    the area of every pixel (any unit, the same for all; float32), the weight of its values.
     """
     seq_dfs = np.ascontiguousarray(seq_dfs).reshape(-1)
     network = seq_dfs >= 0

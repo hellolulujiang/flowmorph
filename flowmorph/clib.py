@@ -1,17 +1,11 @@
-"""Three routines of the C library, called as the C code of FlowMorph calls them.
+"""Three maths routines for the numba kernels.
 
-The plan form of a catchment (:mod:`flowmorph.sphere`) is decided by signs and ties: which
-pixel is farthest, on which side of a line a pixel centre lies.  To give the C's answers the port has to compute
-the same doubles, and three of the C's routines have no equal in numba:
-
-``sincos``     the sine and the cosine of one angle.  On macOS clang compiles ``cos(x)`` and ``sin(x)`` of one
-               argument into one call of ``__sincos_stret``, whose last bit can differ from the two separate
-               routines; the C's tables of the rows' latitudes and the columns' longitudes are made that way, and
-               so are these.  On other systems the two separate routines are called, as a C compiled there does.
-``remainder``  the IEEE remainder of the C library (a longitude kept next to another, whatever turn it is on).
-``fma``        the fused multiply-add, which the C calls by name in one place: the exact sign of an orientation in
-               the convex hull.  Everywhere else the C is compiled without fused multiply-adds, and numba does not
-               fuse either.
+``sincos``     the sine and the cosine of one angle: on macOS from one call of ``__sincos_stret``, elsewhere from the
+               separate ``sin`` and ``cos``.  Their last bits can differ from one system to another, and with them a
+               tie of the plan form (which pixel is farthest, on which side of a line a pixel centre lies).
+``remainder``  the IEEE remainder of the system's maths library (a longitude kept next to another, whatever turn it
+               is on).
+``fma``        the fused multiply-add, for the exact sign of an orientation in the convex hull.
 """
 
 import math
@@ -72,12 +66,12 @@ def _fma(typingctx, x, y, z):
 if ON_MACOS:
     @njit(inline="always")
     def sincos(x):
-        """(sin x, cos x) from one ``__sincos_stret`` call, as the C binary on macOS takes them."""
+        """(sin x, cos x) from one ``__sincos_stret`` call."""
         return _sincos_stret(float(x))
 else:
     @njit(inline="always")
     def sincos(x):
-        """(sin x, cos x) from the two routines of the C library."""
+        """(sin x, cos x) from the separate ``sin`` and ``cos``."""
         return math.sin(x), math.cos(x)
 
 

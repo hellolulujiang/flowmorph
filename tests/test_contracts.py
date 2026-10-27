@@ -113,7 +113,7 @@ def test_a_wrong_index_is_refused():
 
 # ---- the grid and the earth ----
 
-def test_the_transform_is_snapped_as_the_c_snaps_it():
+def test_the_transform_is_snapped_to_the_grid_and_rounded():
     header = (147.51708333, 0.00083333, 0.0, -42.41875, 0.0, -0.00083333)
     assert snap_transform(header) == (147.517083333333, 0.000833333333, 0.0, -42.41875, 0.0, -0.000833333333)
     assert pixel_edges_deg(header) == (1.0 / 1200.0, 1.0 / 1200.0)
@@ -188,7 +188,7 @@ def test_the_object_refuses_a_rotated_or_south_up_grid():
 
 
 def test_the_entries_called_on_their_own_refuse_a_rotated_grid():
-    """as the object does: the slope of a sheared grid was computed as if the grid were north up"""
+    """The standalone slope and boundary functions require north-up grids, as the FlowMorph object does."""
     from flowmorph.boundary import boundary_walk
     from flowmorph.earth import model_code
     from flowmorph.slope import local_slope
@@ -258,8 +258,7 @@ def test_the_means_of_the_terrain_are_weighted_by_pixel_area():
 
 
 def test_a_network_pixel_without_a_slope_is_refused():
-    """In 1.0 a network pixel whose slope was -9999 entered the mean slope as 0 degrees with its whole weight; it
-    is refused, as a pixel without an elevation is."""
+    """Every network pixel needs a finite slope other than -9999, as it needs a valid elevation."""
     from flowmorph.terrain import upstream_terrain
     d8 = np.full((4, 1), 4, dtype=np.uint8)
     d8[3, 0] = 0

@@ -1,6 +1,6 @@
 """Step 3: the plan form of every pixel's upstream catchment, attributes [7] .. [10].
 
-    [7]  perimeter_km     km  P: FlowMorph 1.0's perimeter, taken on cells close to square on the ground
+    [7]  perimeter_km     km  P: the weighted Moore trace, taken on cells close to square on the ground
                               (:mod:`flowmorph.vscells`): the outer contour traced through the boundary pixels'
                               centres from the topmost, then leftmost, boundary pixel, with the step weights of
                               Vossepoel & Smeulders (1982) for square pixels, on cells of k columns (k from the
@@ -169,7 +169,7 @@ def _boundary_walk(seq, nrow, ncol, cell_of_rank, target_cell, target_rank, targ
             outputs[target, 2] = np.float32(sphere.basin_width(
                 cells, size, this_cell, farthest_row, farthest_col, ncol, west, x_resolution, north, y_resolution,
                 cos_latitude_of_row, sin_latitude_of_row, cos_longitude_of_col, sin_longitude_of_col, model))
-        # [7] P: 1.0's perimeter on cells close to square on the ground, from the topmost, then leftmost, boundary
+        # [7] P: the weighted Moore trace on cells close to square, from the topmost, then leftmost, boundary
         # pixel (its row the catchment's first; the lowest boundary pixel's row its last)
         if size >= 3:
             start = cells[0]
@@ -217,8 +217,8 @@ def boundary_walk(seq_dfs, upg, upa, is_target, shape, transform, model, pixel_e
     """The four attributes of step 3, each a float32 array over the pixels (-9999 where not written).
 
     ``transform`` places the pixel centres and corners.  ``pixel_edges`` is the pixel's width and height in degrees
-    for the lengths of its edges in the perimeter ([7]), as in 1.0: :func:`flowmorph.grid.pixel_edges_deg` of the
-    transform when not given (1/1200 both on MERIT Hydro, as the C code takes them).
+    for the lengths of its edges in the perimeter ([7]): :func:`flowmorph.grid.pixel_edges_deg` of the transform
+    when not given (1/1200 both on MERIT Hydro).
 
     Raises ValueError when a catchment cannot be measured.  A contour that does not close is a fault of the input.
     A convex hull that reaches more than 80 degrees (some 8,900 km) from its pixel, or that rings a pole, is beyond
@@ -226,8 +226,7 @@ def boundary_walk(seq_dfs, upg, upa, is_target, shape, transform, model, pixel_e
     grid of the Earth it most often means that the transform is not the grid's)."""
     nrow, ncol = shape
     given_transform = transform
-    transform = north_up(transform)               # as the C code takes it (a transform already taken so stays as
-    #                                               it is); a rotated grid is refused, as the FlowMorph object does
+    transform = north_up(transform)               # snapped to the grid; a rotated or sheared grid is refused
     seq = np.ascontiguousarray(seq_dfs, dtype=np.int32).reshape(-1)
     network = seq >= 0
     cells = np.flatnonzero(network)

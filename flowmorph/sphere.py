@@ -2,8 +2,7 @@
 
 Every centre and every corner of a pixel is a point of the sphere of the geodetic latitudes and longitudes, and a
 length is that of a great circle of that sphere on the earth model (:mod:`flowmorph.earth`), added up in pieces of
-at most 5 km.  This is the port, statement for statement, of the C implementation of FlowMorph
-1.1.
+at most 5 km.
 
 ``basin length``  L_b.  The farthest pixel of the boundary is the one at the largest angle from the target (the
                   smallest cosine of the two unit vectors; on equal cosines the first in the grid's row-major
@@ -30,8 +29,7 @@ farthest (by up to 0.2 %), and there the axis turns and the width with it (by -1
 
 The grid's tables (:func:`grid_tables`) hold the cosine and the sine of the latitude of every row's centre and edge
 and of the longitude of every column's centre and edge, so that a centre or a corner is a unit vector without a call
-to cos or sin.  The centres' tables run one pixel beyond the grid on every side (index row + 1, column + 1), as the C
-code's do.
+to cos or sin.  The centres' tables run one pixel beyond the grid on every side (index row + 1, column + 1).
 """
 
 import math

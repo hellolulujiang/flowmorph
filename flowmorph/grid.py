@@ -1,8 +1,7 @@
-"""The transform of a grid, taken as the C code takes it.
+"""The grid transform used for computation and for output.
 
 A GeoTIFF header carries the pixel size and the origin in decimal, and the last bits of those numbers are noise
-(1/1200 written as 0.00083333, say).  The C code puts them back before it uses them, and so does this package, so
-that both place every pixel centre at the same double:
+(1/1200 written as 0.00083333, say).  The transform used for computation is snapped to the grid and rounded:
 
 1. the pixel size goes back on 1/N, N a divisor of MERIT Hydro's 1200 or HydroSHEDS' 3600 pixels per degree, when it
    is within 1e-5 of it (relative);
@@ -13,7 +12,7 @@ A grid of another resolution keeps its size; its origin still goes back on its o
 within 1e-4 of a half pixel of it (step 2), and step 3 applies.  The centre of pixel (row, col) is
 then (transform[0] + (col + 0.5) transform[1], transform[3] + (row + 0.5) transform[5]).  :func:`pixel_edges_deg`
 gives the size of step 1 without the rounding of step 3: the edges of a pixel as the perimeter ([7],
-:mod:`flowmorph.vscells`) takes them, as in FlowMorph 1.0.
+:mod:`flowmorph.vscells`) takes them.
 
 A file is written with :func:`exact_transform`, steps 1 and 2 without step 3: the rounding to 1e-12 leaves 1/1200 as
 0.000833333333, and a grid of MERIT Hydro written with it would carry that size in its header.
@@ -59,7 +58,7 @@ def _origin_on_the_exact_grid(origin, pixel_size):
 
 
 def snap_transform(transform):
-    """The six terms of a transform (GDAL order) as the C code uses them."""
+    """The six terms of a transform (GDAL order), snapped to the grid and rounded to 1e-12 degree."""
     terms = [float(value) for value in transform]
     terms[1] = _pixel_size_on_the_exact_fraction(terms[1])
     terms[5] = _pixel_size_on_the_exact_fraction(terms[5])
@@ -84,10 +83,11 @@ def exact_transform(transform):
 
 
 def north_up(transform):
-    """The six terms of a transform as the C code uses them (:func:`snap_transform`), for the entries that take a
-    transform from the caller: six finite numbers, no rotation or shear (the third and fifth terms 0), a positive
-    width and a negative height that the rounding to 1e-12 of a degree does not take to 0.  ValueError otherwise:
-    the C code's drivers refuse such a grid, and the arithmetic of this package would take it for a north-up one."""
+    """Check a north-up transform and return its six snapped terms (:func:`snap_transform`).
+
+    Requires six finite numbers, no rotation or shear (the third and fifth terms 0), a positive width and a
+    negative height that the rounding to 1e-12 degree does not take to 0. Raises ValueError otherwise: the
+    kernels assume a north-up grid and divide by its pixel size."""
     terms = [float(value) for value in transform]
     if len(terms) != 6 or not all(math.isfinite(value) for value in terms):
         raise ValueError("the transform must be six finite numbers")
@@ -101,7 +101,7 @@ def north_up(transform):
 
 def pixel_edges_deg(transform):
     """The width and height of a pixel in degrees for the lengths of its edges: the size put back on 1/N (step 1
-    above) and not rounded, so 1/1200 exactly on MERIT Hydro's grid, as the perimeter of FlowMorph 1.0 took it."""
+    above) and not rounded, so 1/1200 exactly on MERIT Hydro's grid."""
     return (abs(_pixel_size_on_the_exact_fraction(float(transform[1]))),
             abs(_pixel_size_on_the_exact_fraction(float(transform[5]))))
 

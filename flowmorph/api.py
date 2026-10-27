@@ -17,7 +17,7 @@ from .terrain import TERRAIN_NAMES, upstream_terrain
 NODATA = -9999.0
 MIN_UPSTREAM_AREA_KM2 = 10.0
 
-# the sixteen in the order of Table 3 of the FullBasin paper
+# the sixteen attributes in output order
 ATTRIBUTE_NAMES = (
     "mean_elv", "min_elv", "max_elv", "elv_std", "mean_slp", "slp_std",
     "perimeter_km", "basin_length_km", "basin_width_km", "convexity",
@@ -68,8 +68,8 @@ class FlowMorph:
     d8 : 2-D uint8 array, MERIT Hydro's flow directions (247 no data, 0 and 255 pits)
     upa : 2-D float array, the upstream area in km^2 (MERIT Hydro's own ``upa``): it chooses the targets and is the
         A of the convexity and of step 4; it also orders the donors of a confluence when ``seq_dfs`` is not given
-    transform : the six numbers of the grid (GDAL order), longitude and latitude in degrees, north up; taken as
-        the C code takes it (:func:`flowmorph.grid.snap_transform`)
+    transform : the six numbers of the grid (GDAL order), longitude and latitude in degrees, north up;
+        snapped to the grid and rounded to 1e-12 degree (:func:`flowmorph.grid.snap_transform`)
     elevation : 2-D float array, -9999 where there is none; needed for steps 1, 2 and 4
     ring : optional (nrow + 2) x (ncol + 2) elevation, the grid with one more pixel on every side, for the slope at
         the grid's edge (see :func:`flowmorph.slope.local_slope`)
@@ -86,7 +86,7 @@ class FlowMorph:
         if d8.ndim != 2:
             raise ValueError("the flow directions must be a 2-D grid")
         self.shape = d8.shape
-        # the C code counts pixels and ranks in 32 bits; a grid beyond that is outside what the two were compared on
+        # the grid must fit the signed 32-bit ranks
         if d8.shape[0] < 1 or d8.shape[1] < 1 or d8.shape[0] * d8.shape[1] > 2**31 - 1:
             raise ValueError(f"the grid is {d8.shape[0]} x {d8.shape[1]}: it must hold at least one pixel and fewer "
                              f"than 2^31")
@@ -153,7 +153,7 @@ class FlowMorph:
 
     def pixel_area(self):
         """The area of every pixel in m^2 on the WGS84 ellipsoid, float32 (one value a row): the weight of a pixel in
-        the means and standard deviations of step 2, as in the C code."""
+        the means and standard deviations of step 2."""
         if "pixel_area" not in self._cache:
             nrow, ncol = self.shape
             area_of_row = np.empty(nrow, dtype=np.float32)

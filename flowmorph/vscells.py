@@ -1,8 +1,6 @@
-"""The perimeter of a catchment: FlowMorph 1.0's perimeter, taken on cells close to square on the ground.
+"""The perimeter of a catchment: the weighted Moore trace, taken on cells close to square on the ground.
 
-This is the port, statement for statement, of the C implementation of FlowMorph 1.1.
-
-``1.0's perimeter``  the outer contour traced through the centres of the catchment's boundary pixels (Moore
+``the trace``        the outer contour traced through the centres of the catchment's boundary pixels (Moore
                      neighbourhood, from the topmost, then leftmost, pixel, done by the stopping rule of Jacob: back on
                      the start pixel and about to make the first step again), each step weighted as Vossepoel &
                      Smeulders (1982) weigh it for square pixels: 0.980 a step along a row or a column, 1.406 /
@@ -12,23 +10,23 @@ This is the port, statement for statement, of the C implementation of FlowMorph 
                      model.  No constant.
 ``the cells``        the weights were made for straight lines on a square grid.  A pixel of a longitude-latitude grid
                      is a = dy / dx times as tall as it is wide on the ground, about 1 / cos(latitude) on a grid with
-                     the same angular step in both (2 at 60 degrees, 3.9 at 75, 5.8 at 80), and there 1.0's perimeter
-                     reads long: on smooth shapes of known perimeter by 2 % at 60 degrees, 7.6 % at 75 and 10 % at
-                     80.  So the columns are merged k at a time into cells and the
-                     trace and the weights are taken on the cells: a cell is in the catchment when one of its k pixels
-                     is, and its east-west edge is k dx.  The cells start at the columns of the global grid that are
-                     multiples of k (:func:`global_col_of_col0`; MERIT Hydro's column c is global column c - 1).
-``continuous``       a is taken at the middle of the catchment's rows; k0 = max(1, floor(a)), w = min(max(a - k0, 0), 1),
-                     and P = (1 - w) P(k0) + w P(k0 + 1), so that P has no step where k changes.  Where a <= 1 (within
-                     6.59 degrees of the equator on WGS84, with the same angular step in both) P is 1.0's perimeter
-                     on the pixels themselves.  A catchment that a merge leaves one or two cells (a few pixels) has
-                     no P, as 1.0 gave none to one or two pixels.
+                     the same angular step in both (2 at 60 degrees, 3.9 at 75, 5.8 at 80), and there the trace on
+                     the pixels reads long: on smooth shapes of known perimeter by 2 % at 60 degrees, 7.6 % at 75 and
+                     10 % at 80.  So the columns are merged k at a time into cells and the trace and the weights are
+                     taken on the cells: a cell is in the catchment when one of its k pixels is, and its east-west
+                     edge is k dx.  The cells start at the columns of the global grid that are multiples of k
+                     (:func:`global_col_of_col0`; MERIT Hydro's column c is global column c - 1).
+``continuous``       a is taken at the middle of the catchment's rows; k0 = max(1, floor(a)),
+                     w = min(max(a - k0, 0), 1), and P = (1 - w) P(k0) + w P(k0 + 1), so that P has no step where k
+                     changes.  Where a <= 1 (within 6.59 degrees of the equator on WGS84, with the same angular step in
+                     both) P is the trace on the pixels themselves.  A catchment that a merge leaves one or two cells
+                     (a few pixels) has no P, as a catchment of one or two pixels has none.
 
-On smooth shapes of known perimeter it reads as 1.0's perimeter does at the equator, at every latitude: 0.98 of the
-perimeter for radii of 10 to 25 pixels, 0.994 for 30 to 80.  The merge measures on cells close to square on the
-ground, which fills the notches of a divide narrower than a cell; where the k cells start moves P by a median 0.4 to
-1.1 %, with no bias.  The pixel's width and height in degrees are those of the grid put back on 1/N
-(:func:`flowmorph.grid.pixel_edges_deg`): 1/1200 both on MERIT Hydro, as the C code takes them.
+On smooth shapes of known perimeter it reads at every latitude as the trace on the pixels does at the equator: 0.98
+of the perimeter for radii of 10 to 25 pixels, 0.994 for 30 to 80.  The merge measures on cells close to square on
+the ground, which fills the notches of a divide narrower than a cell; where the k cells start moves P by a median
+0.4 to 1.1 %, with no bias.  The pixel's width and height in degrees are those of the grid put back on 1/N
+(:func:`flowmorph.grid.pixel_edges_deg`): 1/1200 both on MERIT Hydro.
 """
 
 import math
@@ -39,7 +37,7 @@ from numba import njit
 from .earth import metres_per_degree
 
 WEIGHT_EVEN_STEP = 0.980
-WEIGHT_ODD_STEP = 1.406 / 1.41421356            # 1.0's constant for the square root of 2
+WEIGHT_ODD_STEP = 1.406 / 1.41421356            # the square root of 2 taken to eight decimals
 WEIGHT_CORNER = 0.091
 
 VS_OK = 0
@@ -53,8 +51,7 @@ _NEIGHBOUR_COL = np.array([0, 1, 1, 1, 0, -1, -1, -1], dtype=np.int64)
 
 @njit
 def pixel_edges_m(latitude_deg, pixel_width_deg, pixel_height_deg, model):
-    """The north-south and the east-west edge (m) of a pixel at a latitude, on the earth model (the C code takes one
-    size for both, 1/1200 on MERIT Hydro: the same numbers where the two are equal)."""
+    """The north-south and the east-west edge (m) of a pixel at a latitude, on the earth model."""
     metres_per_degree_latitude, metres_per_degree_longitude = metres_per_degree(latitude_deg, model)
     return metres_per_degree_latitude * pixel_height_deg, metres_per_degree_longitude * pixel_width_deg
 
@@ -109,7 +106,7 @@ def _cell_is_inside(seq, nrow, ncol, first_rank, last_rank, global_col_of_col0, 
 @njit
 def cells_length_m(seq, nrow, ncol, first_rank, last_rank, north, y_resolution, global_col_of_col0, pixel_width_deg,
                    pixel_height_deg, start_row, start_col, k, step_count_max, model):
-    """(status, length in m) of 1.0's perimeter on cells of k columns, from the topmost, then leftmost, pixel of the
+    """(status, length in m) of the trace on cells of k columns, from the topmost, then leftmost, pixel of the
     catchment.  The length is 0 when the trace on the cells made fewer than three steps (one or two cells)."""
     if k < 1 or not _in_range(seq, start_row, start_col, nrow, ncol, first_rank, last_rank):
         return VS_BAD_START, 0.0
@@ -197,7 +194,7 @@ def cells_length_m(seq, nrow, ncol, first_rank, last_rank, north, y_resolution, 
             return VS_OK, 0.0               # one cell: no length
         return VS_NOT_CLOSED, 0.0
     if step_count < 3:
-        return VS_OK, 0.0                   # two cells: 1.0 wrote a no-data
+        return VS_OK, 0.0                   # two cells: no length
     # the trace ends where it started: its last step and its first are consecutive too
     if previous_code >= 0 and first_code >= 0 and (previous_code % 2) != (first_code % 2):
         north_south_edge_m, east_west_edge_m = pixel_edges_m(north + (float(start_row) + 0.5) * y_resolution,
@@ -236,15 +233,14 @@ def perimeter_m(seq, nrow, ncol, first_rank, last_rank, north, y_resolution, glo
 
 
 def global_col_of_col0(west, pixel_width_deg):
-    """The column of the global grid (counted from 180 W) of the grid's column 0, as the C code takes it: the whole
-    pixels between 180 W and its west edge, a quarter of a pixel added and the result rounded down.  A grid whose edges
-    lie on 180 W (HydroSHEDS) gives its column; MERIT Hydro's column c, whose west edge lies half a pixel west of it,
-    gives c - 1 in every window.  (Rounded to the nearest whole number instead, MERIT Hydro's half pixel would be
-    decided by the last bits of the header: c - 1 in every region of the 1400deg2 partition, c in about half of the
-    windows that start elsewhere.)  Every window gives the same global columns on a grid whose pixel edges lie on
-    180 W or half a pixel off it (MERIT Hydro, HydroSHEDS); on a grid offset by another fraction of a pixel windows may
-    differ by a column.  The columns count in the window's own longitudes: the same pixels given 360 degrees apart
-    start their cells at other columns where k does not divide 432,000 (k of 7 or more: on MERIT Hydro north of 81.8
+    """The column of the global grid (counted from 180 W) of the grid's column 0: the whole pixels between 180 W and
+    its west edge, a quarter of a pixel added and the result rounded down.  A grid whose edges lie on 180 W
+    (HydroSHEDS) gives its column; MERIT Hydro's column c, whose west edge lies half a pixel west of it, gives c - 1
+    in every window.  (Rounded to the nearest whole number instead, MERIT Hydro's half pixel would be decided by the
+    last bits of the header.)  Every window gives the same global columns on a grid whose pixel edges lie on 180 W or
+    half a pixel off it (MERIT Hydro, HydroSHEDS); on a grid offset by another fraction of a pixel windows may differ
+    by a column.  The columns count in the window's own longitudes: the same pixels given 360 degrees apart start
+    their cells at other columns where k does not divide 432,000 (k of 7 or more: on MERIT Hydro north of 81.8
     degrees, where no land reaches 180 E)."""
     return int(math.floor((float(west) + 180.0) / float(pixel_width_deg) + 0.25))
 

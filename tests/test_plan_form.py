@@ -54,8 +54,8 @@ def _centre(row, col, north, west=10.0, pixel=PIXEL):
 # ---- the perimeter: a reference written apart from the package ----
 
 def _reference_on_cells_m(mask, north, west, k, pixel=PIXEL):
-    """1.0's perimeter on cells of k columns, written as plainly as it reads: the columns merged k at a time from the
-    global columns that are multiples of k (a cell is in when one of its pixels is), the Moore trace of the merged
+    """The weighted trace on cells of k columns, written as plainly as it reads: the columns merged k at a time from
+    the global columns that are multiples of k (a cell is in when one of its pixels is), the Moore trace of the merged
     grid from its topmost-leftmost cell with Jacob's stopping rule, the steps weighted 0.980, 1.406 / 1.41421356 and
     -0.091 a corner, a cell's edges k dx by dy at the latitude halfway along the step.  0 for fewer than three steps."""
     nrow, ncol = mask.shape
@@ -146,7 +146,7 @@ def test_the_cells_are_traced_as_the_reference_traces_them(north):
 @pytest.mark.parametrize("north", (3.0, 30.0, 49.0, 62.0, 75.0, 81.0))
 def test_the_perimeter_is_taken_between_two_merges(north):
     # (1 - w) P(k0) + w P(k0 + 1), k0 and w at the middle of the catchment's rows; where a pixel is wider than
-    # tall (within 6.59 degrees of the equator) P is 1.0's perimeter on the pixels themselves
+    # tall (within 6.59 degrees of the equator) P is the weighted trace on the pixels themselves
     rng = np.random.default_rng(7)
     mask = _ragged(rng, 50, 300)
     west = 25.0
@@ -164,7 +164,7 @@ def test_the_perimeter_is_taken_between_two_merges(north):
 
 @pytest.mark.parametrize("north", (0.5, -4.0))
 def test_a_rectangle_of_pixels_has_the_weighted_length_of_its_trace(north):
-    # near the equator, where P is 1.0's on the pixels: the trace goes round the centres, n - 1 steps a side, and a
+    # near the equator, where P is the trace on the pixels: it goes round the centres, n - 1 steps a side, and a
     # rectangle has no corner between a step along a row or column and a diagonal one
     mask = np.zeros((12, 15), bool)
     mask[2:9, 3:13] = True                                  # 7 rows by 10 columns
@@ -209,8 +209,8 @@ def _ellipse(rng, north, cells_wide):
 
 
 def test_known_ellipses_read_alike_at_every_latitude():
-    # 1.0's perimeter on the pixels reads some 10 % long at 80 degrees; on cells close to square it reads as at the
-    # equator, at every latitude
+    # on the pixels the weighted trace reads some 10 % long at 80 degrees; on cells close to square it reads
+    # as at the equator, at every latitude
     rng = np.random.default_rng(2026)
     medians = []
     for north in (0.0, 45.0, 60.0, 75.0, 80.0):
@@ -280,13 +280,12 @@ def test_toward_the_poles_the_merge_is_held_at_89_5_degrees():
         assert vscells.merge_at_latitude(latitude, PIXEL, PIXEL, WGS84) == held, latitude
 
 
-def test_the_c_codes_perimeter_on_made_up_catchments():
+def test_the_perimeter_of_made_up_catchments_matches_the_reference():
     """Cells two to nine columns wide, grids west of 180 W and catchments that touch the grid's edges: the package
-    against the C code's doubles (tests/reference/expected_c_vs_cells_synthetic.npz,
-    tests/reference/make_expected_c_synthetic.py), bit for bit."""
+    against the reference doubles (tests/reference/expected_perimeter_synthetic.npz), bit for bit."""
     import os
     here = os.path.dirname(os.path.abspath(__file__))
-    with np.load(os.path.join(here, "reference", "expected_c_vs_cells_synthetic.npz")) as archive:
+    with np.load(os.path.join(here, "reference", "expected_perimeter_synthetic.npz")) as archive:
         masks, transforms, want, ncol = archive["masks"], archive["transforms"], archive["perimeter_m"], int(archive["ncol"])
     k_seen = set()
     for packed, t, expected in zip(masks, transforms, want):
@@ -347,7 +346,7 @@ def test_the_start_must_be_the_topmost_leftmost_pixel_and_the_trace_close():
 
 def test_a_catchment_that_a_merge_leaves_two_cells_has_no_perimeter():
     # three pixels along a row at 30 degrees (k0 = 1, w = 0.15): the merge of two columns leaves two cells, whose
-    # trace has no length, so P has none though P(1) has one (as 1.0 gave none to one or two pixels)
+    # trace has no length, so P has none though P(1) has one
     line = np.zeros((10, 30), bool)
     line[5, 10:13] = True                                   # column 0 at global column 216000, even
     assert vscells.global_col_of_col0(0.0, PIXEL) % 2 == 0
@@ -512,7 +511,7 @@ def test_the_target_alone_and_a_one_sided_catchment():
     axis_only[2:6, 10] = False
     _, _, width_of_the_row, _, _ = _plan_form(axis_only, (6, 1), 1.0, 0.004)
     # pixels on the axis itself: the side a pixel is on is the sign of a sine that is rounding there (1e-17), so
-    # the width of a straight line of pixels is not exactly 0 but some 1e-10 km, as in the C code
+    # the width of a straight line of pixels is not exactly 0 but some 1e-10 km
     assert width_of_the_row < 1.0e-6 and width_km > 0.3
 
 
@@ -566,7 +565,7 @@ def test_a_catchment_next_to_a_pole_is_measured():
     assert walked["perimeter_km"][nrow - 1, 0] > 0.0
 
 
-def test_inputs_are_taken_as_the_c_code_takes_them():
+def test_inputs_are_normalised_and_checked():
     import flowmorph
     from flowmorph.grid import snap_transform
     written = (10.0, 0.00083333, 0.0, 47.0, 0.0, -0.00083333)

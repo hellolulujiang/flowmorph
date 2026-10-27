@@ -104,8 +104,7 @@ def _write_with_mask(path, values, hidden, nodata=None):
 
 
 def test_a_mask_over_cells_that_hold_values_is_refused(tmp_path):
-    """the C programs read the values and know no mask: two sinks, one of them hidden by a mask band, would be one
-    sink here and two there"""
+    """A mask band that hides a pixel holding a value (here one of two sinks) is refused."""
     sinks = np.array([[0, 0]], dtype=np.uint8)
     hidden = np.array([[False, True]])
     with pytest.raises(ValueError, match="mask hides 1 pixels that hold values"):
@@ -117,8 +116,7 @@ def test_a_mask_over_cells_that_hold_values_is_refused(tmp_path):
 
 
 def test_a_mask_over_the_packages_own_no_data_is_let_through(tmp_path):
-    """no no-data declared, a mask band over pixels that hold 247 / -9999 / -1: the C code, reading the values, takes
-    them for no data as well"""
+    """With no no-data value declared, a mask may hide the package's own no-data values: 247 / -9999 / -1."""
     hidden = np.array([[False, True]])
     d8, _, _ = raster.read_d8(_write_with_mask(tmp_path / "dir.tif", np.array([[0, 247]], dtype=np.uint8), hidden))
     assert d8.tolist() == [[0, 247]]
@@ -154,7 +152,7 @@ def test_a_file_that_is_there_is_not_written_over(tmp_path):
     assert raster.read_float(path).tolist() == [[1.0, 2.0]]
 
 
-def test_a_mask_that_is_the_no_data_value_reads_as_before(tmp_path):
+def test_a_mask_that_is_the_no_data_value_is_read_as_the_value(tmp_path):
     """MERIT Hydro's way: the no data is a value of the raster (247 for the directions), and its mask says no more"""
     directions = np.array([[1, 247]], dtype=np.uint8)
     path = tmp_path / "dir_nodata.tif"

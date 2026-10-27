@@ -1,12 +1,12 @@
-"""Lengths and areas on the earth, as the C code of FlowMorph takes them.
+"""Lengths and areas on the earth.
 
-Two models.  ``"wgs84"`` (the default of FlowMorph 1.1) is the WGS84 ellipsoid: the metres of one degree from its
+Two models.  ``"wgs84"`` (the default) is the WGS84 ellipsoid: the metres of one degree from its
 meridian and prime-vertical radii, a great-circle distance on the authalic sphere scaled to the ellipsoid along the
 bearing at the mid-latitude, and polygon areas from the ellipsoid's zone function.  ``"sphere"`` is the authalic
-sphere of radius 6 371 007.181 m, on which the FullBasin v1.0 layers were measured.
+sphere of radius 6 371 007.181 m.
 
 The slope of :mod:`flowmorph.slope` does not depend on the model: it takes the metres of one degree from the fixed
-series :func:`degree_metres_x` and :func:`degree_metres_y`, as the C code does.
+series :func:`degree_metres_x` and :func:`degree_metres_y`.
 
 The functions the kernels call are compiled with numba, and those that depend on the model take it as an integer
 (:data:`WGS84` or :data:`SPHERE`); :func:`model_code` turns the name into the integer.
@@ -66,7 +66,7 @@ def metres_per_degree(latitude_deg, model):
     phi = latitude_deg * to_rad
     if model == SPHERE:
         return R_AUTHALIC * to_rad, R_AUTHALIC * to_rad * math.cos(phi)
-    sin_phi, cos_phi = sincos(phi)                      # one call for the two, as the C binary on macOS takes them
+    sin_phi, cos_phi = sincos(phi)                      # the sine and the cosine of one angle (flowmorph.clib)
     s2 = sin_phi * sin_phi
     w = math.sqrt(1.0 - WGS84_E2 * s2)
     meridian_radius = WGS84_A * (1.0 - WGS84_E2) / (w * w * w)
@@ -100,17 +100,14 @@ def distance_with_cosines_m(latitude_1, longitude_1, latitude_2, longitude_2, co
          + cos_latitude_1 * cos_latitude_2 * math.sin(dlon / 2.0) * math.sin(dlon / 2.0))
     # rounding must not carry a above 1 (a point and the point opposite it: one unit in the last place above 1 at
     # one latitude in 25).  Below 0 a cannot come by rounding (both terms are squares times cosines of latitudes,
-    # none negative): a cosine of a latitude beyond a pole was given, and the distance is then not a number, as in
-    # the C code
+    # none negative): a cosine of a latitude beyond a pole was given, and the distance is then not a number
     if a > 1.0:
         a = 1.0
     d_sphere = R_AUTHALIC * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     if model == SPHERE or d_sphere <= 0.0:
         return d_sphere
     phim = 0.5 * (la1 + la2)
-    # the sine and the cosine of one angle together, as the C code's compiler takes them (clib.sincos): taken apart
-    # the sine differs in its last bit at some latitudes (26 degrees), and this length is under every plan-form
-    # length (metres_per_degree takes them together)
+    # the sine and the cosine as metres_per_degree takes them, for the scale along this bearing
     sin_phim, cos_phim = sincos(phim)
     s2 = sin_phim * sin_phim
     w = math.sqrt(1.0 - WGS84_E2 * s2)

@@ -1,19 +1,16 @@
-"""The bundled basin against the C code of FlowMorph 1.1.
+"""The bundled basin against reference values.
 
-The example is one basin of MERIT Hydro (696 km^2, 110,125 pixels, 2,033 targets) cut from region 5699 of the
-1400deg2 partition, with the region's C outputs cut to the same window (tests/reference/expected_c.npz), written by
-an earlier state of the C code on MERIT Hydro's elevation, the bundled one.  On the region's own tiles the package
-gives the C's numbers bit for bit (README, "Same numbers as the C code").
+The example is one basin of MERIT Hydro in Tasmania (696 km^2, 110,125 pixels, 2,033 targets), with MERIT Hydro's
+own elevation.  tests/reference/expected.npz holds reference values of the attributes on this window: an attribute
+must have their no-data pattern and differ from them by less than 5e-7 (relative), but for two groups that the
+reference takes otherwise.
 
-The C code has changed two groups of layers since the reference was made.  WEIGHTED (below): the means and standard
-deviations are weighted by pixel area, where the reference counts every pixel once; they are checked against a
-plain recomputation.  PERIMETER (below): the perimeter is taken on cells close to square on the ground;
-tests/reference/expected_c_perimeter.npz holds the C code's perimeter of every target of this window (made by
-tests/reference/make_expected_c_perimeter.py), and the package must give it bit for bit; the three ratios made from
-the perimeter are checked against the reference through the change of the perimeter.  Cutting the window moves its
-origin, and with it the last bits of some pixel centres, so here a value may differ from the C's in its last place:
-the test asks for the same no-data pattern and a relative difference below 5e-7, but for the five layers of WEIGHTED
-and the three ratios of PERIMETER (to 1e-6 through the change of the perimeter).
+WEIGHTED   weighted by pixel area, where the reference counts every pixel once: checked against a plain
+           recomputation, and against the reference for how little they move on this basin.
+PERIMETER  the reference perimeter is the shortest polygon between the centres inside and outside the catchment.
+           tests/reference/expected_perimeter.npz holds the perimeter of every target, which must come out bit for
+           bit in float32 km and to 1e-12 in metres; the three ratios made from the perimeter are checked against
+           the reference scaled by the change of the perimeter, to 1e-6.
 """
 
 import math
@@ -38,7 +35,7 @@ def example():
 
 @pytest.fixture(scope="module")
 def expected():
-    with np.load(os.path.join(HERE, "reference", "expected_c.npz")) as archive:
+    with np.load(os.path.join(HERE, "reference", "expected.npz")) as archive:
         return {name: archive[name] for name in archive.files}
 
 
@@ -53,12 +50,13 @@ def test_the_example_is_one_whole_basin(example):
 # weighted by pixel area; the reference file counts every pixel once.  They are checked against a plain
 # recomputation below, and against the reference only for how little a basin of half a degree changes.
 WEIGHTED = ("mean_elv", "elv_std", "mean_slp", "slp_std", "hypsometric_integral")
-# the perimeter and the three ratios made from it: the reference holds them as an earlier perimeter gave them
+# the perimeter and its three ratios: the reference perimeter is the shortest polygon between the centres inside
+# and outside
 PERIMETER = ("perimeter_km", "gravelius", "circularity", "lemniscate_ratio")
 
 
 @pytest.mark.parametrize("name", [n for n in ("slp",) + flowmorph.ATTRIBUTE_NAMES if n not in WEIGHTED + PERIMETER])
-def test_every_attribute_matches_the_c(example, expected, name):
+def test_every_attribute_matches_the_reference(example, expected, name):
     fm, attributes = example
     got = attributes[name]
     want = expected[name]
@@ -81,23 +79,24 @@ def test_the_values_are_mostly_bit_for_bit(example, expected):
         assert differ <= 3, (name, differ)
 
 
-def test_the_perimeter_is_the_c_codes_bit_for_bit(example):
+def test_the_perimeter_matches_the_reference_bit_for_bit(example):
     _, attributes = example
-    with np.load(os.path.join(HERE, "reference", "expected_c_perimeter.npz")) as archive:
+    with np.load(os.path.join(HERE, "reference", "expected_perimeter.npz")) as archive:
         want = archive["perimeter_km"]
     got = attributes["perimeter_km"]
     assert got.dtype == np.float32 and int((want != np.float32(-9999)).sum()) == 2033
     assert np.array_equal(got.view(np.int32), want.view(np.int32))
 
 
-def test_the_perimeter_in_metres_is_the_c_codes_bit_for_bit(example):
-    """The doubles before the division by 1000 and the cast to float32: every target's catchment taken as step 3
-    takes it (its boundary pixels give the start, the last row and the cap), measured by flowmorph.vscells, against
-    the C code's metres of the same catchment."""
+def test_the_perimeter_in_metres_matches_the_reference(example):
+    """The doubles in metres, against the reference metres of the same catchment, to a relative 1e-12.
+
+    Every target is measured by flowmorph.vscells with the boundary's start, last row and cap as step 3
+    takes them."""
     from flowmorph import vscells
     from flowmorph.grid import pixel_edges_deg
     fm, _ = example
-    with np.load(os.path.join(HERE, "reference", "expected_c_perimeter.npz")) as archive:
+    with np.load(os.path.join(HERE, "reference", "expected_perimeter.npz")) as archive:
         want, cells = archive["perimeter_m"], archive["target_cell"]
     nrow, ncol = fm.shape
     seq = np.ascontiguousarray(fm.seq_dfs, dtype=np.int32).reshape(-1)
@@ -124,12 +123,14 @@ def test_the_perimeter_in_metres_is_the_c_codes_bit_for_bit(example):
                                                  height, start // ncol, end // ncol, start // ncol, start % ncol,
                                                  10 * boundary.size + 100, fm._model)
         assert status == vscells.VS_OK
-    assert np.array_equal(got.view(np.int64), want.view(np.int64))
+    # The metres go through the system's cos and sin, whose last bits can differ between platforms; the float32
+    # kilometres above are compared bit for bit.
+    np.testing.assert_allclose(got, want, rtol=1e-12, atol=0)
 
 
 def test_the_ratios_follow_the_perimeter(example, expected):
     """gravelius = P / (2 sqrt(pi A)), circularity = 4 pi A / P^2 and lemniscate_ratio = P_lemniscate / P: against
-    the C code's values of the reference, each scaled by the change of the perimeter (new / old, and its inverse
+    the reference values, scaled by the weighted Moore perimeter over the reference perimeter (and its inverse
     square or inverse), to float32 rounding."""
     _, attributes = example
     written = expected["perimeter_km"] != np.float32(-9999)
@@ -141,7 +142,7 @@ def test_the_ratios_follow_the_perimeter(example, expected):
         np.testing.assert_allclose(attributes[name][written][there], old[there] * scale[there] ** power, rtol=1e-6,
                                    atol=0, err_msg=name)
     # this basin lies at 42 S, where a pixel is 1.35 times as tall as it is wide: the perimeter is some 4 to 7 % longer
-    # than the earlier perimeter of the reference (the shortest polygon between the centres inside and outside)
+    # than the reference perimeter (the shortest polygon between the centres inside and outside)
     assert 1.03 < float(np.median(scale)) < 1.08
 
 
@@ -177,7 +178,7 @@ def test_the_weighted_terrain_is_what_a_plain_recomputation_gives(example, expec
         if high > low:
             integral = ((a * elevation[members]).sum() / a.sum() - low) / (high - low)
             assert float(attributes["hypsometric_integral"].reshape(-1)[cell]) == pytest.approx(integral, rel=1e-4, abs=1e-6)
-    # this basin lies within half a degree of latitude: the weighted values are close to those of before
+    # this basin spans half a degree of latitude: area-weighted values are close to the equal-pixel reference
     for name, limit in (("mean_elv", 0.5), ("elv_std", 0.5), ("mean_slp", 0.02), ("slp_std", 0.02), ("hypsometric_integral", 1e-3)):
         written = expected[name] != np.float32(-9999)
         assert np.array_equal(attributes[name] == np.float32(-9999), ~written), name
@@ -220,13 +221,13 @@ def test_writing_and_reading_back(example, tmp_path):
     assert written[2] == 0.0 and written[4] == 0.0
     for term in (0, 3):                              # the origin on the grid of half pixels, to 4 units in the last place
         assert abs(written[term] - given[term]) <= 4 * math.ulp(given[term])
-    assert fm.transform[1] != 1.0 / 1200.0          # what the computations take, rounded as the C code's
+    assert fm.transform[1] != 1.0 / 1200.0          # the computation transform is rounded to 1e-12
 
 
 def test_exact_transform_undoes_the_rounding():
     from flowmorph.grid import exact_transform, snap_transform
     exact = (142.99958333333336, 1.0 / 1200.0, 0.0, -39.00041666666667, 0.0, -1.0 / 1200.0)
-    assert snap_transform(exact)[1] == 0.000833333333          # the C code's rounding to 1e-12
+    assert snap_transform(exact)[1] == 0.000833333333          # the transform rounded to 1e-12
     for rounded in (snap_transform(exact), (142.999583333333, 0.000833333333, 0.0, -39.000416666667, 0.0,
                                             -0.000833333333)):
         back = exact_transform(rounded)
