@@ -49,8 +49,9 @@ python -m flowmorph data/dir_example.tif data/upa_example.tif data/elv_example.t
 `--earth sphere`, `--ring` (a larger elevation grid for the slope at the grid's edge) and `--seq-dfs` with `--upg`
 (FlowTopo's sequence of the grid and its upstream pixel count, made from the flow directions when not given).
 
-The bundled example is one basin of MERIT Hydro in Tasmania (696 km², 110,125 pixels, 2,033 of them with 10 km²
-or more upstream).
+The bundled example is the basin of the FullBasin paper, the Nanxi River in Fujian, China (729 km², 93,432 pixels,
+1,929 of them with 10 km² or more upstream): MERIT Hydro's flow directions and upstream area on the basin, and MERIT
+DEM's elevation on the window, with one pixel of margin for the slope at the basin's edge.
 
 
 ## Input
@@ -79,8 +80,8 @@ take the centre value.
 
 FullMorph v1.1 was computed with this method region by region on the 90 regions of
 [FullDivide v1.1](https://fullhydro.org/downloads/merit-hydro-v1.0.1-90m/fullbasin/fulldivide/v1.1/), with the
-elevation of MERIT DEM v1.0.3 and, for the slope at a region's edge, the terrain beyond it (`ring_path` above). The
-bundled example's `elv` is MERIT Hydro's own elevation, so its terrain values are not those of FullMorph.
+elevation of MERIT DEM v1.0.3 and, for the slope at a region's edge, the terrain beyond it (`ring_path` above). On the
+bundled example FlowMorph gives the values of FullMorph v1.1.
 
 
 ## The sixteen attributes
@@ -159,8 +160,8 @@ against the flow directions before they are used.
 pytest
 ```
 
-`tests/test_example.py` runs the bundled basin against reference values in `tests/reference/expected.npz` and
-`tests/reference/expected_perimeter.npz`, with a recomputation of the attributes weighted by pixel area.
+`tests/test_example.py` runs the bundled basin against FullMorph v1.1 (`tests/reference/expected.npz`), with a
+recomputation of the attributes weighted by pixel area.
 
 * `tests/test_contracts.py` checks rules, refusals and formulas on small made-up grids.
 * `tests/test_plan_form.py` checks the perimeter, the length, the width and the hull on shapes of known values, and
@@ -178,4 +179,5 @@ that paper, and this repository with the release you used.
 ## Acknowledgements
 
 **MERIT Hydro** (Yamazaki et al., 2019; [10.1029/2019WR024873](https://doi.org/10.1029/2019WR024873)) is the grid
-FlowMorph was built on, and the source of the bundled example.
+FlowMorph was built on, and gives the bundled example's flow directions and upstream area. **MERIT DEM**
+(Yamazaki et al., 2017; [10.1002/2017GL072874](https://doi.org/10.1002/2017GL072874)) gives its elevation.

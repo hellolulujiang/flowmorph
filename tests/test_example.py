@@ -1,16 +1,11 @@
-"""The bundled basin against reference values.
+"""The bundled basin against the published FullMorph v1.1.
 
-The example is one basin of MERIT Hydro in Tasmania (696 km^2, 110,125 pixels, 2,033 targets), with MERIT Hydro's
-own elevation.  tests/reference/expected.npz holds reference values of the attributes on this window: an attribute
-must have their no-data pattern and differ from them by less than 5e-7 (relative), but for two groups that the
-reference takes otherwise.
-
-WEIGHTED   weighted by pixel area, where the reference counts every pixel once: checked against a plain
-           recomputation, and against the reference for how little they move on this basin.
-PERIMETER  the reference perimeter is the shortest polygon between the centres inside and outside the catchment.
-           tests/reference/expected_perimeter.npz holds the perimeter of every target, which must come out bit for
-           bit in float32 km and to 1e-12 in metres; the three ratios made from the perimeter are checked against
-           the reference scaled by the change of the perimeter, to 1e-6.
+The example is the basin of the FullBasin paper, the Nanxi River in Fujian (basin 8595 of region 43; 729 km^2, 93,432
+pixels, 1,929 targets): MERIT Hydro's flow directions and upstream area on the basin's pixels, and MERIT DEM's
+elevation on the whole window, which keeps one pixel of margin so that every slope in the basin sees its eight
+neighbours.  tests/reference/expected.npz holds the 16 attributes of FullMorph v1.1 cut from region 43 to this basin:
+an attribute must have their no-data pattern and differ from them by less than 5e-7 (relative), and nearly every value
+is bit for bit.
 """
 
 import math
@@ -41,28 +36,16 @@ def expected():
 
 def test_the_example_is_one_whole_basin(example):
     fm, _ = example
-    assert int((fm.seq_dfs >= 0).sum()) == 110125
+    assert int((fm.seq_dfs >= 0).sum()) == 93432
     assert int((fm.idxs_ds == np.arange(fm.idxs_ds.size)).sum()) == 1
-    assert int(fm.is_target.sum()) == 2033
+    assert int(fm.is_target.sum()) == 1929
 
 
-# the four means and standard deviations of step 2, and the hypsometric integral made from the mean elevation, are
-# weighted by pixel area; the reference file counts every pixel once.  They are checked against a plain
-# recomputation below, and against the reference only for how little a basin of half a degree changes.
-WEIGHTED = ("mean_elv", "elv_std", "mean_slp", "slp_std", "hypsometric_integral")
-# the perimeter and its three ratios: the reference perimeter is the shortest polygon between the centres inside
-# and outside
-PERIMETER = ("perimeter_km", "gravelius", "circularity", "lemniscate_ratio")
-
-
-@pytest.mark.parametrize("name", [n for n in ("slp",) + flowmorph.ATTRIBUTE_NAMES if n not in WEIGHTED + PERIMETER])
+@pytest.mark.parametrize("name", flowmorph.ATTRIBUTE_NAMES)
 def test_every_attribute_matches_the_reference(example, expected, name):
-    fm, attributes = example
+    _, attributes = example
     got = attributes[name]
     want = expected[name]
-    network = (fm.seq_dfs >= 0).reshape(fm.shape)
-    if name == "slp":
-        got = np.where(network, got, np.float32(-9999))
     assert got.dtype == np.float32
     assert np.array_equal(got == np.float32(-9999), want == np.float32(-9999))
     written = want != np.float32(-9999)
@@ -70,83 +53,16 @@ def test_every_attribute_matches_the_reference(example, expected, name):
 
 
 def test_the_values_are_mostly_bit_for_bit(example, expected):
+    """Of the 1,929 values of an attribute at most a few differ in the last bits: the sums of the means and standard
+    deviations, and the hull, can round otherwise than in the C program that wrote FullMorph."""
     _, attributes = example
     for name in flowmorph.ATTRIBUTE_NAMES:
-        if name in WEIGHTED + PERIMETER:
-            continue
         written = expected[name] != np.float32(-9999)
         differ = int((attributes[name][written] != expected[name][written]).sum())
-        assert differ <= 3, (name, differ)
+        assert differ <= 5, (name, differ)
 
 
-def test_the_perimeter_matches_the_reference_bit_for_bit(example):
-    _, attributes = example
-    with np.load(os.path.join(HERE, "reference", "expected_perimeter.npz")) as archive:
-        want = archive["perimeter_km"]
-    got = attributes["perimeter_km"]
-    assert got.dtype == np.float32 and int((want != np.float32(-9999)).sum()) == 2033
-    assert np.array_equal(got.view(np.int32), want.view(np.int32))
-
-
-def test_the_perimeter_in_metres_matches_the_reference(example):
-    """The doubles in metres, against the reference metres of the same catchment, to a relative 1e-12.
-
-    Every target is measured by flowmorph.vscells with the boundary's start, last row and cap as step 3
-    takes them."""
-    from flowmorph import vscells
-    from flowmorph.grid import pixel_edges_deg
-    fm, _ = example
-    with np.load(os.path.join(HERE, "reference", "expected_perimeter.npz")) as archive:
-        want, cells = archive["perimeter_m"], archive["target_cell"]
-    nrow, ncol = fm.shape
-    seq = np.ascontiguousarray(fm.seq_dfs, dtype=np.int32).reshape(-1)
-    upg = fm.upg.reshape(-1)
-    t = fm.transform
-    width, height = pixel_edges_deg(t)
-    col0 = vscells.global_col_of_col0(t[0], width)
-    got = np.zeros_like(want)
-    for index, cell in enumerate(cells):
-        last = int(seq[cell])
-        first = last - int(upg[cell]) + 1
-        inside = ((seq >= first) & (seq <= last)).reshape(nrow, ncol)
-        padded = np.pad(inside, 1)
-        all_in = np.ones_like(inside)
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                if dr or dc:
-                    all_in &= padded[1 + dr:1 + dr + nrow, 1 + dc:1 + dc + ncol]
-        boundary = np.flatnonzero((inside & ~all_in).reshape(-1))
-        if boundary.size < 3:
-            continue
-        start, end = int(boundary.min()), int(boundary.max())
-        status, got[index] = vscells.perimeter_m(seq, nrow, ncol, first, last, float(t[3]), float(t[5]), col0, width,
-                                                 height, start // ncol, end // ncol, start // ncol, start % ncol,
-                                                 10 * boundary.size + 100, fm._model)
-        assert status == vscells.VS_OK
-    # The metres go through the system's cos and sin, whose last bits can differ between platforms; the float32
-    # kilometres above are compared bit for bit.
-    np.testing.assert_allclose(got, want, rtol=1e-12, atol=0)
-
-
-def test_the_ratios_follow_the_perimeter(example, expected):
-    """gravelius = P / (2 sqrt(pi A)), circularity = 4 pi A / P^2 and lemniscate_ratio = P_lemniscate / P: against
-    the reference values, scaled by the weighted Moore perimeter over the reference perimeter (and its inverse
-    square or inverse), to float32 rounding."""
-    _, attributes = example
-    written = expected["perimeter_km"] != np.float32(-9999)
-    scale = attributes["perimeter_km"][written].astype(np.float64) / expected["perimeter_km"][written].astype(np.float64)
-    for name, power in (("gravelius", 1.0), ("circularity", -2.0), ("lemniscate_ratio", -1.0)):
-        old = expected[name][written]
-        there = old != np.float32(-9999)
-        assert np.array_equal(attributes[name][written] == np.float32(-9999), ~there), name
-        np.testing.assert_allclose(attributes[name][written][there], old[there] * scale[there] ** power, rtol=1e-6,
-                                   atol=0, err_msg=name)
-    # this basin lies at 42 S, where a pixel is 1.35 times as tall as it is wide: the perimeter is some 4 to 7 % longer
-    # than the reference perimeter (the shortest polygon between the centres inside and outside)
-    assert 1.03 < float(np.median(scale)) < 1.08
-
-
-def test_the_weighted_terrain_is_what_a_plain_recomputation_gives(example, expected):
+def test_the_weighted_terrain_is_what_a_plain_recomputation_gives(example):
     """For 80 targets from the smallest to the outlet: the pixels of the catchment are the ranks
     [seq - upg + 1, seq]; their elevations and slopes averaged in float64 with the pixel areas as weights -- the
     area of every row integrated in the test (tests/ellipsoid_area.py) and kept as float32, as the package keeps
@@ -178,11 +94,6 @@ def test_the_weighted_terrain_is_what_a_plain_recomputation_gives(example, expec
         if high > low:
             integral = ((a * elevation[members]).sum() / a.sum() - low) / (high - low)
             assert float(attributes["hypsometric_integral"].reshape(-1)[cell]) == pytest.approx(integral, rel=1e-4, abs=1e-6)
-    # this basin spans half a degree of latitude: area-weighted values are close to the equal-pixel reference
-    for name, limit in (("mean_elv", 0.5), ("elv_std", 0.5), ("mean_slp", 0.02), ("slp_std", 0.02), ("hypsometric_integral", 1e-3)):
-        written = expected[name] != np.float32(-9999)
-        assert np.array_equal(attributes[name] == np.float32(-9999), ~written), name
-        assert float(np.max(np.abs(attributes[name][written] - expected[name][written]))) < limit, name
 
 
 def test_the_index_given_or_made_gives_the_same_attributes(example):

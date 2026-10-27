@@ -57,4 +57,4 @@ Cite the FullBasin paper (Jiang et al., under review at *Earth System Science Da
 
 ## Licence
 
-MIT; see [LICENSE](LICENSE). The bundled MERIT Hydro excerpt and the three figures keep their own terms; see [DATA_NOTICE.md](DATA_NOTICE.md).
+MIT; see [LICENSE](LICENSE). The bundled MERIT Hydro and MERIT DEM excerpt and the three figures keep their own terms; see [DATA_NOTICE.md](DATA_NOTICE.md).

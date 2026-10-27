@@ -29,7 +29,7 @@ from .shape import SHAPE_NAMES, shape_arithmetic
 from .slope import local_slope
 from .terrain import TERRAIN_NAMES, upstream_terrain
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 __all__ = [
     "FlowMorph", "ATTRIBUTE_NAMES", "MIN_UPSTREAM_AREA_KM2", "EARTH_MODELS",

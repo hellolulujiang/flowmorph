@@ -22,10 +22,10 @@ at most 5 km.
 
 Measured instead in one plane centred on the target, with the target's east-west scale everywhere, a pixel 20
 degrees poleward of a target at 30 N comes out 1.35 times too far east or west, the width of a large northern river
-some 30 % short, and the hull of a large high-latitude catchment some 1 % off.  On the 2,033 catchments of the
-bundled basin (696 km2 at 42 S) the sphere and that plane differ in the width by less than 0.2 % for 98 in 100 and
-in the hull by less than 0.03 % for all; the length is the same but for 25, where another boundary pixel is the
-farthest (by up to 0.2 %), and there the axis turns and the width with it (by -19 to +12 %).
+some 30 % short, and the hull of a large high-latitude catchment some 1 % off.  On the 1,929 catchments of the
+bundled basin (729 km2 at 24 N) the sphere and that plane differ in the width by less than 0.2 % for all but 8 and
+in the hull by less than 0.02 % for all; the length agrees to float32 rounding but for 8, where another boundary
+pixel is the farthest (by up to 0.4 %), and there the axis turns and the width with it (by -15 to +6 %).
 
 The grid's tables (:func:`grid_tables`) hold the cosine and the sine of the latitude of every row's centre and edge
 and of the longitude of every column's centre and edge, so that a centre or a corner is a unit vector without a call

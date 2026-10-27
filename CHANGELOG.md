@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 (2026-10-28)
+
+* The bundled example is the basin of the FullBasin paper, the Nanxi River (729 km², 1,929 targets), with the
+  elevation of MERIT DEM v1.0.3 and one pixel of margin. `tests/test_example.py` compares all sixteen attributes with
+  the published FullMorph v1.1.
+* Results are unchanged.
+
 ## 1.1.1 (2026-10-28)
 
 * The bundled MERIT Hydro excerpt keeps both licences, CC BY-NC 4.0 or ODbL 1.0 at the user's choice.
