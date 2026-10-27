@@ -41,11 +41,21 @@ def test_the_example_is_one_whole_basin(example):
     assert int(fm.is_target.sum()) == 1929
 
 
+# At this target the two farthest boundary pixels, (246, 38) and (246, 40), mirror each other across its column and
+# are at the same angle from it.  Where the system's cos and sin give them equal cosines, the first in row-major order
+# is the farthest, as in the program that wrote FullMorph; where their last bits differ, the other may be.  The length
+# is the same; the axis turns and the width with it.
+MIRRORED, OTHER_WIDTH = (186, 39), np.float32(4.7943816)
+
+
 @pytest.mark.parametrize("name", flowmorph.ATTRIBUTE_NAMES)
 def test_every_attribute_matches_the_reference(example, expected, name):
     _, attributes = example
     got = attributes[name]
     want = expected[name]
+    if name == "basin_width_km" and got[MIRRORED] == OTHER_WIDTH:
+        got = got.copy()
+        got[MIRRORED] = want[MIRRORED]
     assert got.dtype == np.float32
     assert np.array_equal(got == np.float32(-9999), want == np.float32(-9999))
     written = want != np.float32(-9999)
